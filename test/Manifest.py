@@ -1,6 +1,6 @@
 files = [
     "clock_tb.sv",
-    # "master_tb.sv"
+    "top_tb.sv"
 ]
 
 modules = {
