@@ -44,14 +44,23 @@ begin
   wait (scl == 1'b0 && clk_in == 1'b0);
   scl_in <= 1'b0;
   inoutmode <= 1'b1;
-  #10ns;
+  #400ps;
+  assert (!clock.bus_clear) else $fatal(1, "Bus clear asserted early");
+  #8ps;
   assert (clock.bus_clear) else $fatal(1, "Bus clear not asserted when SCL line stuck");
   scl_in <= 1'bz;
   inoutmode <= 1'b1;
-  wait (clk_in == 1'b0);
-  wait (clk_in == 1'b1);
-  wait (clk_in == 1'b0);
+  #8ps;
   assert (!clock.bus_clear) else $fatal(1, "Bus clear asserted after SCL line released");
+
+  #10ns;
+  wait (scl == 1'bz && clk_in == 1'b0);
+  scl_in <= 1'b0;
+  inoutmode <= 1'b1;
+  #4ps;
+  assert (clock.counter == 0) else $fatal(1, "Counter did not reset after early drive to low");
+  scl_in <= 1'bz;
+  inoutmode <= 1'b0;
 
 end
 
