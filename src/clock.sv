@@ -16,7 +16,7 @@ logic [COUNTER_WIDTH-1:0] counter = COUNTER_WIDTH'(COUNTER_RISE + 1);
 
 logic scl_internal;
 assign scl_internal = counter >= COUNTER_RISE;
-assign scl = scl_internal ? (PUSH_PULL ? 1'b1 : 1'bZ) : 1'b0;
+assign scl = scl_internal ? (PUSH_PULL ? 1'b1 : 1'bz) : 1'b0;
 
 logic scl_held_low;
 assign scl_held_low = !scl && counter > COUNTER_RISE && !PUSH_PULL;
