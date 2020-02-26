@@ -1,8 +1,8 @@
 # i2c
 
+[![Build Status](https://travis-ci.org/hdl-util/i2c.svg?branch=master)](https://travis-ci.org/hdl-util/i2c)
+
 Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge cases
-
-
 
 ## To-dos
 
