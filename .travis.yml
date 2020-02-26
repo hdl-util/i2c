@@ -21,8 +21,8 @@ install:
     - stat /home/travis/intelFPGA/19.1/modelsim_ase || (curl 'http://download.altera.com/akdlm/software/acdsinst/19.1std/670/ib_installers/ModelSimSetup-19.1.0.670-linux.run' -o ModelSimSetup.run && chmod +x ModelSimSetup.run && travis_wait 30 ./ModelSimSetup.run --mode unattended --accept_eula 1 && sed -i 's/linux_rh60/linux/g' /home/travis/intelFPGA/19.1/modelsim_ase/vco )
 script:
     - export PATH=$PATH:/home/travis/intelFPGA/19.1/modelsim_ase/bin
-    - cd ./sim/master_tb/ && hdlmake fetch && hdlmake && make
-    - cd -
+#    - cd ./sim/master_tb/ && hdlmake fetch && hdlmake && make
+#    - cd -
     - cd ./sim/clock_tb/ && hdlmake fetch && hdlmake && make
 
 cache:
