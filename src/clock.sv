@@ -7,12 +7,11 @@ module clock #(
 )(
     inout logic scl,
     input logic clk_in,
-    output logic bus_clear
+    output logic bus_clear,
+    output logic [$clog2(COUNTER_END)-1:0] counter = COUNTER_RISE + 1
 );
 localparam COUNTER_WIDTH = $clog2(COUNTER_END);
 localparam WAIT_WIDTH = $clog2(WAIT_END);
-
-logic [COUNTER_WIDTH-1:0] counter = COUNTER_WIDTH'(COUNTER_RISE + 1);
 
 logic scl_internal;
 assign scl_internal = counter >= COUNTER_RISE;

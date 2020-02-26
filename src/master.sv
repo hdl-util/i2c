@@ -1,23 +1,20 @@
 module master #(
-    // 50 MHz is commonly available in many FPGAs. Must be at least 4x the scl rate.
+    // 50 MHz is commonly available in many FPGAs. Must be at least 4 times the scl rate.
     parameter INPUT_CLK_RATE = 50000000,
-    parameter MODE = 0, // 0 = Standard, 1 = Fast, 2 = Fast Plus
+    // Targeted i2c frequency. Maximum depends on the desired mode.
+    parameter TARGET_SCL_RATE = 100000,
 
-    // Is a slave on the bus capable of clock stretching or are there multiple masters? (if unsure, safer to assume yes)
+    // Is a slave on the bus capable of clock stretching? (if unsure, safer to assume yes)
     parameter CLOCK_STRETCHING = 1,
 
     // Are there multiple masters? (if unsure, safer to assume yes but more efficient to assume no)
     parameter MULTI_MASTER = 0,
 
-    // Do some slaves sample at a lower rate? (if unsure, safer to assume yes)
-    parameter START_BYTE = 1,
-
     // If there are multiple masters, detecting an scl line stuck LOW for bus_clear depends on knowing how slow the slowest master is.
     parameter SLOWEST_MASTER_RATE = 100,
 
-
     // "For a single master application, the master’s SCL output can be a push-pull driver design if there are no devices on the bus which would stretch the clock."
-    // When using a push-pull driver, driving the scl line to HIGH while another device is driving it to LOW will create a short circuit.
+    // When using a push-pull driver, driving the scl line to HIGH while another device is driving it to LOW will create a short circuit, damaging your FPGA.
     // If you enable the below parameter, you must be certain that this will not happen, and you accept the risks if it does.
     parameter FORCE_PUSH_PULL = 0
 ) (
@@ -28,40 +25,47 @@ module master #(
     inout logic sda,
     input logic mode, // 0 = transmit, 1 = receive
 
-    // These two flags are exclusive
+    // These two flags are exclusive; a transfer can't continue if a new one is starting
     input logic transfer_start, // begin a new transfer asap (repeated START, START)
-    input logic transfer_continue, // continue transfer (send ACK and begin next transaction)
-    output logic transaction_ready, // ready for a new transaction (idling)
+    input logic transfer_continue, // whether transfer continues AFTER this transaction. If not, a STOP or repeated START is issued.
+
+    output logic transfer_ready, // ready for a new transfer (bus is not busy)
     output logic interrupt = 1'b1, // A transaction has completed or an error occurred.
     output logic transaction_complete, // ready for a new transaction
     output logic ack = 1'b0, // Whether an ACK/NACK was received during the last transaction (0 = ACK, 1 = NACK)
-    output logic start_err = 1'd0, // A master issued a START condition while the bus was busy
-    output logic arbitration_err = 1'b0, // Another master won the transaction due to arbitration
+    output logic start_err = 1'd0, // Another master illegally issued a START condition while the bus was busy
+    output logic arbitration_err = 1'b0, // Another master won the transaction due to arbitration, (or issued a START condition, when the user of this master wanted to)
 
     input logic [7:0] data_tx,
     output logic [7:0] data_rx = latched_data,
     output logic data_rx_enable = 1'b0,
 );
-
-localparam TARGET_SCL_RATE = MODE == 0 ? 100000 : MODE == 1 ? 400000 : MODE == 2 ? 1000000 : 100000;
+localparam MODE = TARGET_SCL_RATE <= 100000 ? 0 : TARGET_SCL_RATE <= 400000 ? 1 : TARGET_SCL_RATE <= 1000000 ? 2 : -1;
 localparam COUNTER_WIDTH = $clog2(INPUT_CLK_RATE / TARGET_SCL_RATE);
-localparam COUNTER_END = COUNTER_WIDTH'(INPUT_CLK_RATE / TARGET_SCL_RATE);
+localparam COUNTER_END = INPUT_CLK_RATE / TARGET_SCL_RATE;
 // Conforms to Table 10 tLOW, tHIGH for SCL clock.
-localparam COUNTER_RISE = COUNTER_WIDTH'(MODE == 0 ? COUNTER_END / 2 : (COUNER_END * 2) / 3);
+localparam COUNTER_RISE = MODE == 0 ? COUNTER_END / 2 : (COUNER_END * 2) / 3;
+localparam WAIT_END = 2 * INPUT_CLK_RATE / SLOWEST_MASTER_RATE;
 
-clock #(.COUNTER_WIDTH(COUNTER_WIDTH), .COUNTER_END(COUNTER_END), .COUNTER_RISE(COUNTER_RISE), .PUSH_PULL(FORCE_PUSH_PULL)) clock (.scl(scl), .bus_clear(bus_clear));
+logic [$clog2(COUNTER_END)-1:0] counter;
+clock #(.COUNTER_END(COUNTER_END), .COUNTER_RISE(COUNTER_RISE), .MULTI_MASTER(MULTI_MASTER), .WAIT_END(WAIT_END), .PUSH_PULL(FORCE_PUSH_PULL)) clock (.scl(scl), .bus_clear(bus_clear), .counter(counter));
+
+logic sda;
+assign sda = sda_internal ? 1'bz : 1'b0;
+logic sda_internal = 1'b1;
 
 // See Section 3.1.4: START and STOP conditions
 logic busy = 1'b0;
-logic repeated_start_by_another_master = 1'b0;
+logic start_by_another_master = 1'b0;
 always @(posedge sda or negedge sda)
 begin
     if (scl)
     begin
         busy <= !sda;
         // See Note 4 in Section 3.1.10
-        if (busy && !sda && transaction_progress != 4'd11 && transaction_progress != 4'd0 && MULTI_MASTER)
-            repeated_start_by_another_master <= 1'd1;
+        // Should only trigger if a start occurs while this master was in the middle of something.
+        if (busy && !sda && transaction_progress != 4'd0 && transaction_progress != 4'd11 && MULTI_MASTER)
+            start_by_another_master <= 1'd1;
     end
 end
 
@@ -70,100 +74,105 @@ localparam COUNTER_RECEIVE = COUNTER_WIDTH'((COUNTER_END - COUNTER_RISE) / 2 + C
 
 logic latched_mode;
 logic [7:0] latched_data;
+logic latched_transfer_continue;
+logic latched_transfer_start;
+
 logic [3:0] transaction_progress = 4'd0;
 
 // Raise flag to ask user what to do next (transaction_continue, transaction_start, or neither)
-assign transaction_complete = counter == COUNTER_RECEIVE && busy && transaction_progress == 4'd9;
-assign transaction_ready = !busy;
+assign transaction_complete = counter == (COUNTER_RECEIVE - 1) && busy && (transaction_progress == 4'd10 || (COUNTER_RECEIVE - 1 == COUNTER_TRANSMIT && transaction_progress == 4'd9));
+assign transfer_ready = !busy;
 
-always @(posedge clk_in or posedge repeated_start_by_another_master)
+always @(posedge clk_in)
 begin
     // See Note 4 in Section 3.1.10
-    if (repeated_start_by_another_master)
+    if (start_by_another_master)
     begin
-        sda <= 1'bZ; // release line
+        sda_internal <= 1'b1; // release line
         transaction_progress <= 4'd0;
-        repeated_start_by_another_master <= 1'b0;
+        start_by_another_master <= 1'b0;
     end
     // "The data on the SDA line must be stable during the HIGH period of the clock."
     else if (counter == COUNTER_RECEIVE)
     begin
         // START or repeated START condition
-        if ((transfer_start && !busy) || (transfer_continue && busy && transaction_progress == 4'd11))
+        // TODO: what if the user saw transaction_ready and put in some stuff, but then busy went high before COUNTER_RECEIVE and now the transaction can't start? user thinks transaction began but it didn't, and there should be an arbitration error later on
+        if (((transaction_progress == 4'd0 && !busy) || transaction_progress == 4'd11) && transfer_start)
         begin
-            sda <= 1'b0;
+            sda_internal <= 1'b0;
             transaction_progress <= 4'd1;
             latched_mode <= mode;
             if (!mode)
                 latched_data <= data_tx;
+            latched_transfer_continue <= transfer_continue;
         end
         else if (busy)
         begin
             // See Section 3.1.5. Shift in data.
-            if (latched_mode && transaction_progress >= 4'd2 && transaction_progress < 4'd10)
-                latched_data[4'd9 - transaction_progress] <= sda;
-            // See Section 3.1.6. Transmitter got an acknowledge bit or receiver sent it
+            if (transaction_progress >= 4'd2 && transaction_progress < 4'd10)
+            begin
+                if (latched_mode)
+                    latched_data[4'd9 - transaction_progress] <= sda;
+                else if (!latched_mode && MULTI_MASTER)
+                    latched_data[4'd9 - transaction_progress]
+            end
+            // See Section 3.1.6. Transmitter got an acknowledge bit or receiver sent it.
             else if (transaction_progress == 4'd10)
             begin
                 // transaction continues immediately in the next LOW, latch now
                 // sda value must be ACK, agnostic of transmit/receive
-                if (transfer_continue && !sda)
+                if (latched_transfer_continue && !sda)
                 begin
+                    transaction_progress <= 4'd1;
                     latched_mode <= mode;
                     if (!mode)
                         latched_data <= data_tx;
-                    transaction_progress <= 4'd1;
+                    latched_transfer_continue <= transfer_continue;
                 end
             end
             // STOP condition
-            else if (transaction_progress == 4'd11)
+            else if (transaction_progress == 4'd11 && !sda)
             begin
-                sda <= 1'bZ;
+                sda_internal <= 1'b1;
                 transaction_progress <= 4'd0;
             end
         end
-        else if (busy && transaction_progress == 4'd0 && MULTI_MASTER) // Another master is doing a transaction (void messages tolerated, Note 5 in Section 3.1.10)
-            sda <= 1'bZ;
+        // Another master is doing a transaction (void messages tolerated, see Note 5 in Section 3.1.10)
+        else if (busy && transaction_progress == 4'd0 && MULTI_MASTER)
+            sda_internal <= 1'b1;
     end
     // "The HIGH or LOW state of the data line can only change when the clock signal on the SCL line is LOW"
     else if (counter == COUNTER_TRANSMIT && busy && transaction_progress != 4'd0)
     begin
+        transaction_progress <= transaction_progress + 4'd1;
         // See Section 3.1.5. Shift out data.
-        if (transaction_progress >= 4'd1 && transaction_progress < 4'd9)
-        begin
-            if (!latched_mode) // transmit
-                sda <= latched_data[4'd8 - transaction_progress] ? 1'bZ : 1'b0;
-            transaction_progress <= transaction_progress + 4'd1;
-        end
+        if (transaction_progress < 4'd9 && !latched_mode)
+            sda_internal <= latched_data[4'd8 - transaction_progress] ? 1'b1 : 1'b0;
         // See Section 3.1.6. Expecting an acknowledge bit transfer in the next HIGH.
         else if (transaction_progress == 4'd9)
-        begin
-            if (!latched_mode)
-                sda <= 1'bZ; // transmitter releases line
-            else
-                sda <= transfer_continue ? 1'b0 : 1'bZ; // receiver sends ACK / NACK
-            transaction_progress <= transaction_progress + 4'd1;
-        end
+            sda_internal <= latched_mode && latched_transfer_continue ? 1'b0 : 1'b1; // receiver sends ACK / NACK, transmitter releases line
         // See Section 3.1.4
         else if (transaction_progress == 4'd10)
-        begin
-            sda <= transfer_start ? 1'bZ : 1'b0; // prepare for repeated START condition or STOP condition
-            transaction_progress <= transaction_progress + 4'd1;
-        end
+            sda_internal <= transfer_start ? 1'b1 : 1'b0; // prepare for repeated START condition or STOP condition
     end
 end
 
 // Flag assignment
-always @(posedge clk_in or posedge repeated_start_by_another_master)
+logic [3:0] prev_transaction_progress = 4'd0;
+always @(posedge clk_in)
 begin
-    start_err = repeated_start_by_another_master;
-    
-    // transmitter notes whether ACK/NACK was received
-    // receiver notes whether ACK/NACK was sent
-    // assumes ACK when another master interrupts the transaction
-    ack = repeated_start_by_another_master ? 1'b0 : sda && counter == COUNTER_RECEIVE && busy && transaction_progress == 4'd10 && !latched_mode;
+    start_err = start_by_another_master;
 
-    interrupt = ack || start_err || transaction_complete;
+    // transmitter notes whether ACK/NACK was received
+    // receiver does nothing
+    // treats a start by another master as as an ACK
+    ack = counter == COUNTER_RECEIVE && busy && transaction_progress == 4'd10 && !latched_mode && sda && !start_by_another_master;
+
+    // transmitter listens for loss of arbitration on receive
+    // treats a start by another master as no loss of arbitration
+    arbitration_err = counter == COUNTER_RECEIVE && busy && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && sda != latched_data[4'd9 - transaction_progress] && !start_by_another_master;
+
+    interrupt = ack || start_err || transaction_complete || arbitration_err;
 end
 
 always @(posedge clk_in)
