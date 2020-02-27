@@ -48,7 +48,7 @@ localparam COUNTER_RISE = MODE == 0 ? COUNTER_END / 2 : (COUNER_END * 2) / 3;
 localparam WAIT_END = 2 * INPUT_CLK_RATE / SLOWEST_MASTER_RATE;
 
 logic [$clog2(COUNTER_END)-1:0] counter;
-clock #(.COUNTER_END(COUNTER_END), .COUNTER_RISE(COUNTER_RISE), .MULTI_MASTER(MULTI_MASTER), .WAIT_END(WAIT_END), .PUSH_PULL(FORCE_PUSH_PULL)) clock (.scl(scl), .bus_clear(bus_clear), .counter(counter));
+clock #(.COUNTER_END(COUNTER_END), .COUNTER_RISE(COUNTER_RISE), .MULTI_MASTER(MULTI_MASTER), .CLOCK_STRETCHING(CLOCK_STRETCHING), .WAIT_END(WAIT_END), .PUSH_PULL(FORCE_PUSH_PULL)) clock (.scl(scl), .bus_clear(bus_clear), .counter(counter));
 
 logic sda;
 assign sda = sda_internal ? 1'bz : 1'b0;

@@ -2,6 +2,7 @@ module clock #(
     parameter COUNTER_END,
     parameter COUNTER_RISE,
     parameter MULTI_MASTER,
+    parameter CLOCK_STRETCHING,
     parameter WAIT_END,
     parameter PUSH_PULL = 0
 )(
@@ -39,7 +40,7 @@ begin
             wait_counter <= WAIT_WIDTH'(0);
         end
         // See Figure 7, wait state. SCL is being held LOW by another device.
-        else if (scl_held_low && !last_scl)
+        else if (scl_held_low && !last_scl && (CLOCK_STRETCHING || MULTI_MASTER))
         begin
             counter <= counter;
             if (wait_counter < WAIT_END) // Saturates to indicate bus clear condition
