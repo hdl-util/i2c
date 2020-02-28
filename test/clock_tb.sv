@@ -1,5 +1,3 @@
-`timescale 1 ps / 1 ps
-
 module clock_tb();
 
 initial begin
@@ -25,7 +23,7 @@ localparam COUNTER_END = INPUT_CLK_RATE / TARGET_SCL_RATE;
 localparam COUNTER_RISE = COUNTER_END / 2;
 localparam WAIT_END = 2 * INPUT_CLK_RATE / SLOWEST_MASTER_RATE;
 logic [$clog2(COUNTER_END)-1:0] counter;
-clock #(.COUNTER_END(COUNTER_END), .COUNTER_RISE(COUNTER_RISE), .MULTI_MASTER(1), .WAIT_END(WAIT_END)) clock(.scl(scl), .clk_in(clk_in), .bus_clear(bus_clear), .counter(counter));
+clock #(.COUNTER_END(COUNTER_END), .COUNTER_RISE(COUNTER_RISE), .MULTI_MASTER(1), .CLOCK_STRETCHING(1), .WAIT_END(WAIT_END)) clock(.scl(scl), .clk_in(clk_in), .bus_clear(bus_clear), .counter(counter));
 
 always @(posedge clk_in)
 begin

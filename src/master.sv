@@ -37,22 +37,29 @@ module master #(
     output logic arbitration_err = 1'b0, // Another master won the transaction due to arbitration, (or issued a START condition, when the user of this master wanted to)
 
     input logic [7:0] data_tx,
-    output logic [7:0] data_rx = latched_data,
-    output logic data_rx_enable = 1'b0,
+    output logic [7:0] data_rx
 );
 localparam MODE = TARGET_SCL_RATE <= 100000 ? 0 : TARGET_SCL_RATE <= 400000 ? 1 : TARGET_SCL_RATE <= 1000000 ? 2 : -1;
 localparam COUNTER_WIDTH = $clog2(INPUT_CLK_RATE / TARGET_SCL_RATE);
 localparam COUNTER_END = INPUT_CLK_RATE / TARGET_SCL_RATE;
 // Conforms to Table 10 tLOW, tHIGH for SCL clock.
-localparam COUNTER_RISE = MODE == 0 ? COUNTER_END / 2 : (COUNER_END * 2) / 3;
+localparam COUNTER_RISE = MODE == 0 ? COUNTER_END / 2 : (COUNTER_END * 2) / 3;
 localparam WAIT_END = 2 * INPUT_CLK_RATE / SLOWEST_MASTER_RATE;
 
 logic [$clog2(COUNTER_END)-1:0] counter;
-clock #(.COUNTER_END(COUNTER_END), .COUNTER_RISE(COUNTER_RISE), .MULTI_MASTER(MULTI_MASTER), .CLOCK_STRETCHING(CLOCK_STRETCHING), .WAIT_END(WAIT_END), .PUSH_PULL(FORCE_PUSH_PULL)) clock (.scl(scl), .bus_clear(bus_clear), .counter(counter));
+clock #(
+    .COUNTER_END(COUNTER_END),
+    .COUNTER_RISE(COUNTER_RISE),
+    .MULTI_MASTER(MULTI_MASTER),
+    .CLOCK_STRETCHING(CLOCK_STRETCHING),
+    .WAIT_END(WAIT_END),
+    .PUSH_PULL(!CLOCK_STRETCHING && !MULTI_MASTER && FORCE_PUSH_PULL)
+) clock (.scl(scl), .clk_in(clk_in), .bus_clear(bus_clear), .counter(counter));
 
-logic sda;
-assign sda = sda_internal ? 1'bz : 1'b0;
 logic sda_internal = 1'b1;
+assign sda = sda_internal ? 1'bz : 1'b0;
+
+logic [3:0] transaction_progress = 4'd0;
 
 // See Section 3.1.4: START and STOP conditions
 logic busy = 1'b0;
@@ -77,11 +84,12 @@ logic [7:0] latched_data;
 logic latched_transfer_continue;
 logic latched_transfer_start;
 
-logic [3:0] transaction_progress = 4'd0;
+assign data_rx = latched_data;
+
 
 // Raise flag to ask user what to do next (transaction_continue, transaction_start, or neither)
 assign transaction_complete = counter == (COUNTER_RECEIVE - 1) && busy && (transaction_progress == 4'd10 || (COUNTER_RECEIVE - 1 == COUNTER_TRANSMIT && transaction_progress == 4'd9));
-assign transfer_ready = !busy;
+assign transfer_ready = counter == (COUNTER_RECEIVE - 1) && !busy;
 
 always @(posedge clk_in)
 begin
@@ -113,8 +121,6 @@ begin
             begin
                 if (latched_mode)
                     latched_data[4'd9 - transaction_progress] <= sda;
-                else if (!latched_mode && MULTI_MASTER)
-                    latched_data[4'd9 - transaction_progress]
             end
             // See Section 3.1.6. Transmitter got an acknowledge bit or receiver sent it.
             else if (transaction_progress == 4'd10)
@@ -170,13 +176,9 @@ begin
 
     // transmitter listens for loss of arbitration on receive
     // treats a start by another master as no loss of arbitration
-    arbitration_err = counter == COUNTER_RECEIVE && busy && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && sda != latched_data[4'd9 - transaction_progress] && !start_by_another_master;
+    arbitration_err = counter == COUNTER_RECEIVE && busy && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && MULTI_MASTER && sda != latched_data[4'd9 - transaction_progress] && !start_by_another_master;
 
     interrupt = ack || start_err || transaction_complete || arbitration_err;
 end
-
-always @(posedge clk_in)
-    // receiver sent ACK and now gives the data to the user
-    data_rx <= latched_mode && counter == COUNTER_RECEIVE && busy && transaction_progress == 4'd10 ? latched_data : 8'dX;
 
 endmodule
