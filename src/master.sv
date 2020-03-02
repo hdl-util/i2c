@@ -71,7 +71,10 @@ begin
     if (scl === 1'bz)
     begin
         busy <= sda === 1'b0;
-        $display("busy value changed! %b to %b", busy, sda === 1'b0);
+        if (sda === 1'b0)
+            $display("Master becomes busy");
+        else
+            $display("Master becomes free @ %d, %d", counter, transaction_progress);
         // See Note 4 in Section 3.1.10
         // Should only trigger if a start occurs while this master was in the middle of something.
         if (busy && sda == 1'b0 && transaction_progress != 4'd0 && transaction_progress != 4'd11 && MULTI_MASTER)
