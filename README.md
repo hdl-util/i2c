@@ -21,3 +21,8 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
 - [ ] Slave
     - [ ] SCL
     - [ ] SDA
+
+## Reference Documents
+
+* [I2C Specification](https://www.nxp.com/docs/en/user-guide/UM10204.pdf)
+* [Understanding the I2C Bus](http://www.ti.com/lit/an/slva704/slva704.pdf)
