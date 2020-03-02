@@ -148,7 +148,11 @@ begin
         end
         // See Section 3.1.5. Shift in data.
         else if (busy && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && latched_mode)
+        `ifdef MODEL_TECH
+            latched_data[4'd9 - transaction_progress] <= sda === 1'bz;
+        `else
             latched_data[4'd9 - transaction_progress] <= sda;
+        `endif
         // STOP condition
         else if (busy && transaction_progress == 4'd11 && !sda)
         begin
@@ -179,8 +183,13 @@ begin
     begin
         transaction_progress <= transaction_progress + 4'd1;
         // See Section 3.1.5. Shift out data.
-        if (transaction_progress < 4'd9 && !latched_mode)
-            sda_internal <= latched_data[4'd8 - transaction_progress];
+        if (transaction_progress < 4'd9)
+        begin
+            if (!latched_mode)
+                sda_internal <= latched_data[4'd8 - transaction_progress];
+            else
+                sda_internal <= 1'b1; // release line for RX
+        end
         // See Section 3.1.6. Expecting an acknowledge bit transfer in the next HIGH.
         else if (transaction_progress == 4'd9)
             sda_internal <= !(latched_mode && latched_transfer_continue); // receiver sends ACK / NACK, transmitter releases line
@@ -188,7 +197,6 @@ begin
         else if (transaction_progress == 4'd10)
             sda_internal <= transfer_start; // prepare for repeated START condition or STOP condition
     end
-    $display("Counter is %d (progress %d)", counter, transaction_progress);
 end
 
 endmodule
