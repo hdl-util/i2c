@@ -14,7 +14,9 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
     - [x] SDA
         - [x] Transmit
         - [x] Receive
-        - [x] Arbitration (multi-master)
+        - [ ] Arbitration (multi-master)
+            - [x] Basic Implementation
+            - [ ] Detect slower masters changing the value by looking at the value exactly at negedge(scl)
     - [x] Port map
 - [ ] Slave
     - [ ] SCL

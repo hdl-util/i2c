@@ -30,9 +30,10 @@ module master #(
     input logic transfer_continue, // whether transfer continues AFTER this transaction. If not, a STOP or repeated START is issued.
 
     output logic transfer_ready, // ready for a new transfer (bus is not busy)
+
     output logic interrupt = 1'b1, // A transaction has completed or an error occurred.
     output logic transaction_complete, // ready for a new transaction
-    output logic ack = 1'b0, // Whether an ACK/NACK was received during the last transaction (0 = ACK, 1 = NACK)
+    output logic nack = 1'b0, // Whether an ACK/NACK was received/sent for the last transaction (0 = ACK, 1 = NACK)
     output logic start_err = 1'd0, // Another master illegally issued a START condition while the bus was busy
     output logic arbitration_err = 1'b0, // Another master won the transaction due to arbitration, (or issued a START condition, when the user of this master wanted to)
 
@@ -64,6 +65,20 @@ logic [3:0] transaction_progress = 4'd0;
 // See Section 3.1.4: START and STOP conditions
 logic busy = 1'b0;
 logic start_by_another_master = 1'b0;
+`ifdef MODEL_TECH
+always @(sda === 1'bz or sda === 1'b0)
+begin
+    if (scl === 1'bz)
+    begin
+        busy <= sda === 1'b0;
+        $display("busy value changed! %b to %b", busy, sda === 1'b0);
+        // See Note 4 in Section 3.1.10
+        // Should only trigger if a start occurs while this master was in the middle of something.
+        if (busy && sda == 1'b0 && transaction_progress != 4'd0 && transaction_progress != 4'd11 && MULTI_MASTER)
+            start_by_another_master <= 1'd1;
+    end
+end
+`else
 always @(posedge sda or negedge sda)
 begin
     if (scl)
@@ -75,9 +90,11 @@ begin
             start_by_another_master <= 1'd1;
     end
 end
+`endif
 
-localparam COUNTER_TRANSMIT = COUNTER_WIDTH'(COUNTER_RISE / 2);
-localparam COUNTER_RECEIVE = COUNTER_WIDTH'((COUNTER_END - COUNTER_RISE) / 2 + COUNTER_RISE);
+localparam COUNTER_TRANSMIT = COUNTER_WIDTH'(COUNTER_RISE / 2) - 1;
+localparam COUNTER_RECEIVE = COUNTER_WIDTH'((COUNTER_END - COUNTER_RISE) / 2 + COUNTER_RISE) - 1;
+// There's a one time-step difference above from the clock generator.
 
 logic latched_mode;
 logic [7:0] latched_data;
@@ -85,67 +102,77 @@ logic latched_transfer_continue;
 logic latched_transfer_start;
 
 assign data_rx = latched_data;
-
-
-// Raise flag to ask user what to do next (transaction_continue, transaction_start, or neither)
-assign transaction_complete = counter == (COUNTER_RECEIVE - 1) && busy && (transaction_progress == 4'd10 || (COUNTER_RECEIVE - 1 == COUNTER_TRANSMIT && transaction_progress == 4'd9));
 assign transfer_ready = counter == (COUNTER_RECEIVE - 1) && !busy;
 
 always @(posedge clk_in)
 begin
+    start_err = start_by_another_master;
+
+    // transmitter listens for loss of arbitration on receive
+    // treats a start by another master as no loss of arbitration
+    arbitration_err = counter == COUNTER_RECEIVE && busy && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && MULTI_MASTER && sda != latched_data[4'd9 - transaction_progress] && !start_by_another_master;
+
+    transaction_complete = counter == COUNTER_RECEIVE && busy && transaction_progress == 4'd10 && !start_by_another_master;
+
+    // transmitter notes whether ACK/NACK was received
+    // receiver notes whether ACK/NACK was sent
+    // treats a start by another master as as an ACK
+    `ifdef MODEL_TECH
+        nack = transaction_complete && sda === 1'bz && !start_by_another_master;
+    `else
+        nack = transaction_complete && sda && !start_by_another_master;
+    `endif
+
+    interrupt = start_err || arbitration_err || transaction_complete;
+
     // See Note 4 in Section 3.1.10
-    if (start_by_another_master)
+    if (start_err || arbitration_err)
     begin
         sda_internal <= 1'b1; // release line
         transaction_progress <= 4'd0;
-        start_by_another_master <= 1'b0;
+        start_by_another_master <= 1'b0; // synchronous reset
     end
     // "The data on the SDA line must be stable during the HIGH period of the clock."
     else if (counter == COUNTER_RECEIVE)
     begin
         // START or repeated START condition
-        // TODO: what if the user saw transaction_ready and put in some stuff, but then busy went high before COUNTER_RECEIVE and now the transaction can't start? user thinks transaction began but it didn't, and there should be an arbitration error later on
-        if (((transaction_progress == 4'd0 && !busy) || transaction_progress == 4'd11) && transfer_start)
+        // TODO: what if the user saw transfer_ready and put in some stuff, but then busy went high before COUNTER_RECEIVE and now the transaction can't start? user thinks transaction began but it didn't, and there should be an arbitration error later on
+        if (((!busy && transaction_progress == 4'd0) || (busy && transaction_progress == 4'd11)) && transfer_start)
         begin
             sda_internal <= 1'b0;
             transaction_progress <= 4'd1;
             latched_mode <= mode;
-            if (!mode)
-                latched_data <= data_tx;
+            // if (!mode) // Mode doesn't matter, save some logic cells
+            latched_data <= data_tx;
             latched_transfer_continue <= transfer_continue;
         end
-        else if (busy)
+        // See Section 3.1.5. Shift in data.
+        else if (busy && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && latched_mode)
+            latched_data[4'd9 - transaction_progress] <= sda;
+        // STOP condition
+        else if (busy && transaction_progress == 4'd11 && !sda)
         begin
-            // See Section 3.1.5. Shift in data.
-            if (transaction_progress >= 4'd2 && transaction_progress < 4'd10)
-            begin
-                if (latched_mode)
-                    latched_data[4'd9 - transaction_progress] <= sda;
-            end
-            // See Section 3.1.6. Transmitter got an acknowledge bit or receiver sent it.
-            else if (transaction_progress == 4'd10)
-            begin
-                // transaction continues immediately in the next LOW, latch now
-                // sda value must be ACK, agnostic of transmit/receive
-                if (latched_transfer_continue && !sda)
-                begin
-                    transaction_progress <= 4'd1;
-                    latched_mode <= mode;
-                    if (!mode)
-                        latched_data <= data_tx;
-                    latched_transfer_continue <= transfer_continue;
-                end
-            end
-            // STOP condition
-            else if (transaction_progress == 4'd11 && !sda)
-            begin
-                sda_internal <= 1'b1;
-                transaction_progress <= 4'd0;
-            end
+            sda_internal <= 1'b1;
+            transaction_progress <= 4'd0;
         end
         // Another master is doing a transaction (void messages tolerated, see Note 5 in Section 3.1.10)
         else if (busy && transaction_progress == 4'd0 && MULTI_MASTER)
             sda_internal <= 1'b1;
+    end
+    else if (counter == COUNTER_RECEIVE + 1)
+    begin
+        // See Section 3.1.6. Transmitter got an acknowledge bit or receiver sent it.
+        // sda value must be ACK, agnostic of transmit/receive
+        // transaction continues immediately in the next LOW, latch now
+        // delayed by a clock here so that user input after transaction_complete can be ready
+        if (busy && transaction_progress == 4'd10 && latched_transfer_continue && !sda)
+        begin
+            transaction_progress <= 4'd1;
+            latched_mode <= mode;
+            // if (!mode) // Mode doesn't matter, save some logic cells
+            latched_data <= data_tx;
+            latched_transfer_continue <= transfer_continue;
+        end
     end
     // "The HIGH or LOW state of the data line can only change when the clock signal on the SCL line is LOW"
     else if (counter == COUNTER_TRANSMIT && busy && transaction_progress != 4'd0)
@@ -153,32 +180,15 @@ begin
         transaction_progress <= transaction_progress + 4'd1;
         // See Section 3.1.5. Shift out data.
         if (transaction_progress < 4'd9 && !latched_mode)
-            sda_internal <= latched_data[4'd8 - transaction_progress] ? 1'b1 : 1'b0;
+            sda_internal <= latched_data[4'd8 - transaction_progress];
         // See Section 3.1.6. Expecting an acknowledge bit transfer in the next HIGH.
         else if (transaction_progress == 4'd9)
-            sda_internal <= latched_mode && latched_transfer_continue ? 1'b0 : 1'b1; // receiver sends ACK / NACK, transmitter releases line
+            sda_internal <= !(latched_mode && latched_transfer_continue); // receiver sends ACK / NACK, transmitter releases line
         // See Section 3.1.4
         else if (transaction_progress == 4'd10)
-            sda_internal <= transfer_start ? 1'b1 : 1'b0; // prepare for repeated START condition or STOP condition
+            sda_internal <= transfer_start; // prepare for repeated START condition or STOP condition
     end
-end
-
-// Flag assignment
-logic [3:0] prev_transaction_progress = 4'd0;
-always @(posedge clk_in)
-begin
-    start_err = start_by_another_master;
-
-    // transmitter notes whether ACK/NACK was received
-    // receiver does nothing
-    // treats a start by another master as as an ACK
-    ack = counter == COUNTER_RECEIVE && busy && transaction_progress == 4'd10 && !latched_mode && sda && !start_by_another_master;
-
-    // transmitter listens for loss of arbitration on receive
-    // treats a start by another master as no loss of arbitration
-    arbitration_err = counter == COUNTER_RECEIVE && busy && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && MULTI_MASTER && sda != latched_data[4'd9 - transaction_progress] && !start_by_another_master;
-
-    interrupt = ack || start_err || transaction_complete || arbitration_err;
+    $display("Counter is %d (progress %d)", counter, transaction_progress);
 end
 
 endmodule

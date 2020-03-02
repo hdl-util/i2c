@@ -1,20 +1,14 @@
 module master_tb();
 
-initial begin
-    #1us $finish;
-end
-
 localparam INPUT_CLK_RATE = 500000;
 localparam TARGET_SCL_RATE = 100000;
 localparam SLOWEST_MASTER_RATE = 10000;
 
-logic scl_in = 1'bz;
 logic sda_in = 1'bz;
-
 logic inoutmode = 1'b0;
 wire scl;
 wire sda;
-assign scl = inoutmode ? scl_in : 1'bz;
+assign scl = 1'bz;
 assign sda = inoutmode ? sda_in : 1'bz;
 
 
@@ -27,7 +21,7 @@ logic transfer_continue = 1'b0;
 logic transfer_ready;
 logic interrupt;
 logic transaction_complete;
-logic ack;
+logic nack;
 logic start_err;
 logic arbitration_err;
 logic [7:0] data_tx = 8'd0;
@@ -51,32 +45,58 @@ master #(
     .transfer_ready(transfer_ready),
     .interrupt(interrupt),
     .transaction_complete(transaction_complete),
-    .ack(ack),
+    .nack(nack),
     .start_err(start_err),
     .arbitration_err(arbitration_err),
     .data_tx(data_tx),
     .data_rx(data_rx)
 );
 
-integer i;
+integer i, j;
 
 logic [7:0] EXPECTED = 8'b10110100;
 
 initial
 begin
-    wait (transfer_ready);
+    wait (transfer_ready && !clk_in);
+    $display("Beginning transmission");
     mode <= 1'b0;
     transfer_start <= 1'b1;
     transfer_continue <= 1'b0;
     data_tx <= EXPECTED;
-    wait (master.transaction_progress == 4'd2);
+    wait (master.counter == master.COUNTER_RECEIVE + 1 && !clk_in);
+    assert (master.busy) else $fatal(1, "Master should be busy");
     for (i = 0; i < 8; i++)
     begin
-        wait (master.counter == master.COUNTER_RECEIVE + 1);
+        wait (master.counter == master.COUNTER_TRANSMIT + 1 && !clk_in);
+        assert (master.transaction_progress == 4'(i + 2)) else $fatal(1, "Unexpected TX progress: %d should be ", master.transaction_progress, i + 2);
+        assert (master.busy) else $fatal(1, "Master should be busy");
         assert (master.sda_internal === EXPECTED[7 - i]) else $fatal(1, "Loop %d TX progress %d expected %b but was %b", i, master.transaction_progress, EXPECTED[7 - i], master.sda_internal);
-        wait (master.counter > master.COUNTER_RECEIVE + 1);
+        wait (master.counter == master.COUNTER_TRANSMIT && !clk_in);
     end
+
+    wait (master.transaction_complete && !clk_in);
+    assert (nack) else $fatal(1, "Slave sent NACK, master should've noted it");
+
+    transfer_start <= 1'b0;
+    transfer_continue <= 1'b0;
+    wait (master.counter == master.COUNTER_RECEIVE + 1 && !clk_in);
+
+    // assert (transfer_ready) else $fatal(1, "Master should be ready to transact again");
+    // $display("%d", master.counter);
+    // mode <= 1'b1;
+    // transfer_start <= 1'b1;
+    // transfer_continue <= 1'b0;
+    // inoutmode <= 1'b1;
+    // wait (master.counter == master.COUNTER_RECEIVE - 1);
+    // for (i = 0; i < 8; i++)
+    // begin
+    //     wait (master.counter == master.COUNTER_TRANSMIT - 1 && master.transaction_progress == 4'd1);
+        
+    //     assert (master.sda_internal === EXPECTED[7 - i]) else $fatal(1, "Loop %d TX progress %d expected %b but was %b", i, master.transaction_progress, EXPECTED[7 - i], master.sda_internal);
+    //     wait (master.counter != master.COUNTER_TRANSMIT);
+    // end
+    $finish;
 end
 
 endmodule
-
