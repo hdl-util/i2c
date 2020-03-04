@@ -34,11 +34,13 @@ module master #(
     output logic interrupt = 1'b1, // A transaction has completed or an error occurred.
     output logic transaction_complete, // ready for a new transaction
     output logic nack = 1'b0, // Whether an ACK/NACK was received/sent for the last transaction (0 = ACK, 1 = NACK)
-    output logic start_err = 1'd0, // Another master illegally issued a START condition while the bus was busy
-    output logic arbitration_err = 1'b0, // Another master won the transaction due to arbitration, (or issued a START condition, when the user of this master wanted to)
 
     input logic [7:0] data_tx,
-    output logic [7:0] data_rx
+    output logic [7:0] data_rx,
+
+    // The below outputs matter ONLY IF there are multiple masters on the bus
+    output logic start_err = 1'd0, // Another master illegally issued a START condition while the bus was busy
+    output logic arbitration_err = 1'b0 // Another master won the transaction due to arbitration, (or issued a START condition, when the user of this master wanted to)
 );
 localparam MODE = TARGET_SCL_RATE <= 100000 ? 0 : TARGET_SCL_RATE <= 400000 ? 1 : TARGET_SCL_RATE <= 1000000 ? 2 : -1;
 localparam COUNTER_WIDTH = $clog2(INPUT_CLK_RATE / TARGET_SCL_RATE);

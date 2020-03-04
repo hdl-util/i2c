@@ -55,7 +55,8 @@ master #(
 integer i, j;
 
 logic [7:0] TEST1 = 8'b10110100;
-logic [63:0] TEST2 = 128'hFEEDFACECAFEBEEF;
+logic [63:0] TEST2 = 128'hFEEDFACEBEEFF00D;
+logic [63:0] TEST3 = 128'hFEEDB105DEADCAFE;
 
 initial
 begin
@@ -79,11 +80,8 @@ begin
     wait (interrupt && !clk_in);
     assert (transaction_complete) else $fatal(1, "Transaction did not complete successfully");
     assert (nack) else $fatal(1, "Slave sent NACK, master should've noted it");
-
     transfer_start <= 1'b0;
     transfer_continue <= 1'b0;
-    wait (master.transaction_progress == 4'd0 && !clk_in);
-    assert (!master.busy) else $fatal(1, "Master should not be busy");
 
 
 
@@ -109,37 +107,11 @@ begin
     assert (transaction_complete) else $fatal(1, "Transaction did not complete successfully");
     assert (nack) else $fatal(1, "Master should've sent NACK");
     assert (data_rx == TEST1) else $fatal(1, "Expected %b, was %b", TEST1, data_rx);
-
     transfer_start <= 1'b0;
     transfer_continue <= 1'b0;
-    wait (master.transaction_progress == 4'd0 && !clk_in);
-    assert (!master.busy) else $fatal(1, "Master should not be busy");
-
-    transfer_start <= 1'b0;
-    transfer_continue <= 1'b0;    wait (transfer_ready && !clk_in);
-    $display("\nBeginning transmission");
-    mode <= 1'b0;
-    transfer_start <= 1'b1;
-    transfer_continue <= 1'b0;
-    data_tx <= TEST1;
-    wait (master.counter == master.COUNTER_RECEIVE + 1 && !clk_in);
-    assert (master.busy) else $fatal(1, "Master should be busy");
-    for (i = 0; i < 8; i++)
-    begin
-        wait (master.counter == master.COUNTER_TRANSMIT + 1 && !clk_in);
-        assert (master.transaction_progress == 4'(i + 2)) else $fatal(1, "Unexpected TX progress: %d should be ", master.transaction_progress, i + 2);
-        assert (master.busy) else $fatal(1, "Master should be busy");
-        assert (master.sda_internal === TEST1[7 - i]) else $fatal(1, "Loop %d TX progress %d expected %b but was %b", i, master.transaction_progress, TEST1[7 - i], master.sda_internal);
-        wait (master.counter == master.COUNTER_TRANSMIT && !clk_in);
-    end
-
-    wait (interrupt && !clk_in);
-    assert (transaction_complete) else $fatal(1, "Transaction did not complete successfully");
-    assert (nack) else $fatal(1, "Slave sent NACK, master should've noted it");
-
-    transfer_start <= 1'b0;
-    transfer_continue <= 1'b0;
-
+    
+    
+    
     wait (transfer_ready && !clk_in);
     $display("\nBeginning bulk transmission");
     mode <= 1'b0;
@@ -149,7 +121,7 @@ begin
     for (j = 0; j < 8; j++)
     begin
         wait (master.counter == master.COUNTER_RECEIVE + 1 + (j == 0 ? 0 : 1) && !clk_in);
-        $display("Byte %d", j);
+        $display("Byte %d (%h)", j, TEST2[7:0]);
         assert (master.busy) else $fatal(1, "Master should be busy");
         wait (master.counter == master.COUNTER_TRANSMIT && !clk_in);
         assert (master.latched_data == TEST2[7:0]) else $fatal(1, "Master didn't latch current byte expected %h but was %h", TEST2[7:0], master.latched_data);
@@ -168,7 +140,7 @@ begin
         assert (transaction_complete) else $fatal(1, "Transaction did not complete successfully");
         assert (j == 7 ? nack : !nack) else $fatal(1, "Unexpected ACK/NACK for %d", j);
         transfer_start <= 1'b0;
-        transfer_continue <= 1'(j != 7);
+        transfer_continue <= 1'(j + 1 != 7);
         if (j != 7)
         begin
             TEST2 <= {8'd0, TEST2[63:8]};
@@ -177,6 +149,38 @@ begin
     end
 
     wait (transfer_ready && !clk_in);
+    $display("\nBeginning bulk reception");
+    mode <= 1'b1;
+    transfer_start <= 1'b1;
+    transfer_continue <= 1'b1;
+    for (j = 0; j < 8; j++)
+    begin
+        wait (master.counter == master.COUNTER_RECEIVE + 1 + (j == 0 ? 0 : 1) && !clk_in);
+        $display("Byte %d (%h)", j, TEST3[7:0]);
+        assert (master.busy) else $fatal(1, "Master should be busy");
+        inoutmode <= 1'b1;
+        for (i = 0; i < 8; i++)
+        begin
+            wait (master.counter == master.COUNTER_TRANSMIT && clk_in);
+            sda_in <= TEST3[7 - i] ? 1'bz : 1'b0;
+            wait (master.counter == master.COUNTER_RECEIVE + 1 && !clk_in);
+            assert (master.latched_data[7 - i] == TEST3[7 - i]) else $fatal(1, "Loop %d RX progress %d expected %b but was %b", i, master.transaction_progress, TEST3[7 - i], master.latched_data[7 - i]);
+        end
+        wait (master.counter == master.COUNTER_TRANSMIT + 1 && !clk_in);
+        inoutmode <= 1'b0;
+        wait (interrupt && !clk_in);
+        assert (transaction_complete) else $fatal(1, "Transaction did not complete successfully");
+        assert (j == 7 ? nack : !nack) else $fatal(1, "Master sent unexpected ACK/NACK for %d", j);
+        transfer_start <= 1'b0;
+        transfer_continue <= 1'(j + 1 != 7);
+        if (j != 7)
+        begin
+            TEST3 <= {8'd0, TEST3[63:8]};
+            data_tx <= TEST3[15:8];
+        end
+    end
+
+    wait(transfer_ready && !clk_in);
 
     $finish;
 end
