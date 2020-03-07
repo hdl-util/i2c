@@ -1,21 +1,24 @@
 module master #(
-    // 50 MHz is commonly available in many FPGAs. Must be at least 4 times the scl rate.
+    // 50 MHz is commonly available in many FPGAs. Must be at least 4 times the target scl rate.
     parameter INPUT_CLK_RATE = 50000000,
-    // Targeted i2c frequency. Maximum depends on the desired mode.
+    // Targeted i2c bus frequency. Actual frequency depends on the slowest device.
     parameter TARGET_SCL_RATE = 100000,
 
-    // Is a slave on the bus capable of clock stretching? (if unsure, safer to assume yes)
+    // Is a slave on the bus capable of clock stretching?
+    // If unsure, it's safer to assume yes.
     parameter CLOCK_STRETCHING = 1,
 
-    // Are there multiple masters? (if unsure, safer to assume yes but more efficient to assume no)
+    // Are there multiple masters?
+    // If unsure, it's safer to assume yes, but more efficient to assume no.
     parameter MULTI_MASTER = 0,
 
-    // If there are multiple masters, detecting an scl line stuck LOW for bus_clear depends on knowing how slow the slowest master is.
-    parameter SLOWEST_MASTER_RATE = 100,
+    // Detecting a stuck state depends on knowing how slow the slowest device is.
+    parameter SLOWEST_DEVICE_RATE = 100,
 
     // "For a single master application, the master’s SCL output can be a push-pull driver design if there are no devices on the bus which would stretch the clock."
-    // When using a push-pull driver, driving the scl line to HIGH while another device is driving it to LOW will create a short circuit, damaging your FPGA.
-    // If you enable the below parameter, you must be certain that this will not happen, and you accept the risks if it does.
+    // When using a push-pull driver, driving SCL HIGH while another device is driving it LOW will create a short circuit, damaging your FPGA.
+    // If you enable this, you must be certain that it will not happen.
+    // By doing so, you acknowledge and accept the risks involved.
     parameter FORCE_PUSH_PULL = 0
 ) (
     inout logic scl,
@@ -26,34 +29,40 @@ module master #(
     input logic mode, // 0 = transmit, 1 = receive
 
     // These two flags are exclusive; a transfer can't continue if a new one is starting
-    input logic transfer_start, // begin a new transfer asap (repeated START, START)
-    input logic transfer_continue, // whether transfer continues AFTER this transaction. If not, a STOP or repeated START is issued.
-
-    output logic transfer_ready, // ready for a new transfer (bus is not busy)
-
-    output logic interrupt = 1'b1, // A transaction has completed or an error occurred.
-    output logic transaction_complete, // ready for a new transaction
-    output logic nack = 1'b0, // Whether an ACK/NACK was received/sent for the last transaction (0 = ACK, 1 = NACK)
-
+    input logic transfer_start, // whether to begin a new transfer asap (repeated START, START)
+    input logic transfer_continue, // whether the transfer contains another transaction AFTER this transaction.
     input logic [7:0] data_tx,
+
+    output logic transfer_ready, // ready for a new transfer (bus is free)
+
+    output logic interrupt = 1'b0, // A transaction has completed or an error occurred.
+    output logic transaction_complete, // ready for a new transaction
+    output logic nack = 1'b0, // When a transaction is complete, whether ACK/NACK was received/sent for the last transaction (0 = ACK, 1 = NACK).
     output logic [7:0] data_rx,
 
-    // The below outputs matter ONLY IF there are multiple masters on the bus
+    // The below errors matter ONLY IF there are multiple masters on the bus
     output logic start_err = 1'd0, // Another master illegally issued a START condition while the bus was busy
     output logic arbitration_err = 1'b0 // Another master won the transaction due to arbitration, (or issued a START condition, when the user of this master wanted to)
 );
+
+// Derives the desired i2c mode from target rate.
 localparam MODE = $unsigned(TARGET_SCL_RATE) <= 100000 ? 0 : $unsigned(TARGET_SCL_RATE) <= 400000 ? 1 : $unsigned(TARGET_SCL_RATE) <= 1000000 ? 2 : -1;
+
 localparam COUNTER_WIDTH = $clog2($unsigned(INPUT_CLK_RATE) / $unsigned(TARGET_SCL_RATE));
 localparam COUNTER_END = COUNTER_WIDTH'($unsigned(INPUT_CLK_RATE) / $unsigned(TARGET_SCL_RATE) - 1);
 // Conforms to Table 10 tLOW, tHIGH for SCL clock.
-localparam COUNTER_HIGH = COUNTER_WIDTH'(MODE == 0 ? (COUNTER_END + 1) / 2 : ((COUNTER_END + 1) * 2) / 3);
-// Conforms to Table 10 tr, rise time for SCL clock.
+localparam COUNTER_HIGH = COUNTER_WIDTH'(MODE == 0 ? ( (COUNTER_WIDTH + 1)'(COUNTER_END) + 1) / 2 : (( (COUNTER_WIDTH + 2)'(COUNTER_END) + 1) * 2) / 3);
+// Conforms to Table 10 tr (rise time) for SCL clock.
 localparam COUNTER_RISE = COUNTER_WIDTH'($ceil($unsigned(INPUT_CLK_RATE) / 1.0E9 * $unsigned(MODE == 0 ? 1000 : MODE == 1 ? 300 : MODE == 2  ? 120 : 0)));
-localparam WAIT_WIDTH = $clog2(2 * $unsigned(INPUT_CLK_RATE) / $unsigned(SLOWEST_MASTER_RATE));
-localparam WAIT_END = WAIT_WIDTH'(2 * $unsigned(INPUT_CLK_RATE) / $unsigned(SLOWEST_MASTER_RATE) - 1);
+
+// Bus clear event counter
+localparam WAIT_WIDTH = $clog2(2 * $unsigned(INPUT_CLK_RATE) / $unsigned(SLOWEST_DEVICE_RATE));
+localparam WAIT_END = WAIT_WIDTH'(2 * $unsigned(INPUT_CLK_RATE) / $unsigned(SLOWEST_DEVICE_RATE) - 1);
 
 logic [COUNTER_WIDTH-1:0] counter;
-logic [COUNTER_WIDTH-1:0] countdown = COUNTER_WIDTH'(0); // hold high counter
+// stick counter
+logic [COUNTER_WIDTH-1:0] countdown = COUNTER_WIDTH'(0);
+// assume bus is free
 logic busy = 1'b0;
 logic [3:0] transaction_progress = 4'd0;
 
@@ -108,6 +117,7 @@ begin
 end
 `endif
 
+// Conforms to Table 10 minimum setup/hold/bus free times.
 localparam TLOW_MIN = MODE == 0 ? 4.7 : MODE == 1 ? 1.3 : MODE == 2 ? 0.5 : 0; // in microseconds
 localparam THIGH_MIN = MODE == 0 ? 4.0 : MODE == 1 ? 0.6 : MODE == 2 ? 0.26 : 0; // in microseconds
 localparam COUNTER_SETUP_REPEATED_START = COUNTER_WIDTH'($ceil($unsigned(INPUT_CLK_RATE)/1E6 * TLOW_MIN));
@@ -117,7 +127,6 @@ localparam COUNTER_BUS_FREE = COUNTER_SETUP_REPEATED_START;
 
 localparam COUNTER_TRANSMIT = COUNTER_WIDTH'(COUNTER_HIGH / 2);
 localparam COUNTER_RECEIVE = COUNTER_WIDTH'((COUNTER_END - COUNTER_HIGH + 1) / 2 + COUNTER_HIGH);
-// There's a one time-step difference above from the clock generator.
 
 logic latched_mode;
 logic [7:0] latched_data;

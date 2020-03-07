@@ -16,9 +16,17 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
     - [x] SDA
         - [x] Transmit
         - [x] Receive
-        - [ ] Arbitration (multi-master)
+        - [x] Arbitration (multi-master)
             - [x] Basic Implementation
-            - [ ] Detect slower masters changing the value by looking at the value exactly at negedge(scl)
+            - [ ] -- Detect slower masters changing the value by looking at the value exactly at negedge(scl) --
+        - [ ] Hotloading (not from i2c spec)
+            - [ ] Self
+                - compensating for jitter of wires connecting/disconnecting... (Schmitt enough?)
+                - listen for WAIT_TIME_END to see if the clock is driven LOW
+                - if no: bus is free
+                - if yes: keep listening until a STOP or START
+            - [x] Other masters
+                - erroneous starts detected w/ start_err
     - [x] Port map
 - Slave
     - [ ] SCL
