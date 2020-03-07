@@ -18,7 +18,7 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
         - [x] Receive
         - [x] Arbitration (multi-master)
             - [x] Basic Implementation
-            - [ ] ~~ Detect slower masters changing the value by looking at the value exactly at negedge(scl) ~~
+            - [ ] ~~Detect slower masters changing the value by looking at the value exactly at negedge(scl)~~
         - [ ] Hotloading (not from i2c spec)
             - [ ] Self
                 - compensating for jitter of wires connecting/disconnecting... (Schmitt enough?)
