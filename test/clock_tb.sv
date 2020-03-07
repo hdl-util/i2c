@@ -1,12 +1,10 @@
 module clock_tb();
 
-initial begin
-  #1us $finish;
-end
 
-localparam INPUT_CLK_RATE = 500000;
-localparam TARGET_SCL_RATE = 100000;
-localparam SLOWEST_MASTER_RATE = 10000;
+
+localparam INPUT_CLK_RATE = $unsigned(500000);
+localparam TARGET_SCL_RATE = $unsigned(100000);
+localparam SLOWEST_MASTER_RATE = $unsigned(10000);
 
 logic scl_in = 1'bz; // Initially, no other master present
 
@@ -18,16 +16,18 @@ logic clk_in = 1'b0;
 always #2 clk_in = ~clk_in;
 logic bus_clear;
 
-localparam COUNTER_END = INPUT_CLK_RATE / TARGET_SCL_RATE;
+localparam COUNTER_WIDTH = $clog2(INPUT_CLK_RATE / TARGET_SCL_RATE);
+localparam COUNTER_END = COUNTER_WIDTH'(INPUT_CLK_RATE / TARGET_SCL_RATE - 1);
 // Conforms to Table 10 tLOW, tHIGH for SCL clock.
-localparam COUNTER_RISE = COUNTER_END / 2;
-localparam WAIT_END = 2 * INPUT_CLK_RATE / SLOWEST_MASTER_RATE;
+localparam COUNTER_HIGH = COUNTER_WIDTH'(COUNTER_END / 2);
+localparam WAIT_WIDTH = $clog2(2 * INPUT_CLK_RATE / SLOWEST_MASTER_RATE);
+localparam WAIT_END = WAIT_WIDTH'(2 * INPUT_CLK_RATE / SLOWEST_MASTER_RATE - 1);
 logic [$clog2(COUNTER_END)-1:0] counter;
-clock #(.COUNTER_END(COUNTER_END), .COUNTER_RISE(COUNTER_RISE), .MULTI_MASTER(1), .CLOCK_STRETCHING(1), .WAIT_END(WAIT_END)) clock(.scl(scl), .clk_in(clk_in), .bus_clear(bus_clear), .counter(counter));
+clock #(.COUNTER_WIDTH(COUNTER_WIDTH), .COUNTER_END(COUNTER_END), .COUNTER_HIGH(COUNTER_HIGH), .COUNTER_RISE(0), .MULTI_MASTER(1), .CLOCK_STRETCHING(1), .WAIT_WIDTH(WAIT_WIDTH), .WAIT_END(WAIT_END)) clock(.scl(scl), .clk_in(clk_in), .release_line(1'b0), .bus_clear(bus_clear), .counter(counter));
 
 always @(posedge clk_in)
 begin
-  if (clock.counter < COUNTER_RISE)
+  if (clock.counter < COUNTER_HIGH)
     assert (scl === 1'b0) else $fatal(1, "High when counter hasn't risen: %b", scl);
   else if (!inoutmode)
   begin
@@ -37,6 +37,8 @@ end
 
 initial
 begin
+  assert(COUNTER_WIDTH == 3) else $fatal(1, "Counter width should be 3 but was %d", COUNTER_WIDTH); 
+  assert(COUNTER_END == 4) else $fatal(1, "Counter end should be 4 but was %d", COUNTER_END);
   #100ns;
   $display("Testing bus clear");
   wait (scl == 1'b0 && clk_in == 1'b0);
@@ -44,15 +46,16 @@ begin
   inoutmode <= 1'b1;
   #400ps;
   assert (!clock.bus_clear) else $fatal(1, "Bus clear asserted early");
-  #8ps;
+  #12ps;
   assert (clock.bus_clear) else $fatal(1, "Bus clear not asserted when SCL line stuck");
   scl_in <= 1'bz;
   inoutmode <= 1'b1;
-  #8ps;
+  #6ps;
   assert (!clock.bus_clear) else $fatal(1, "Bus clear asserted after SCL line released");
 
+  $display("Testing reset");
   #10ns;
-  wait (scl == 1'bz && clk_in == 1'b0);
+  wait (scl === 1'bz && clk_in == 1'b0);
   scl_in <= 1'b0;
   inoutmode <= 1'b1;
   #4ps;
@@ -60,6 +63,7 @@ begin
   scl_in <= 1'bz;
   inoutmode <= 1'b0;
 
+  $finish;
 end
 
 endmodule
