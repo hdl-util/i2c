@@ -9,7 +9,7 @@ module clock #(
     parameter WAIT_END,
     parameter PUSH_PULL = 0
 )(
-    inout logic scl,
+    inout wire scl,
     input logic clk_in,
     input logic release_line,
     output logic bus_clear,

@@ -21,11 +21,11 @@ module i2c_master #(
     // By doing so, you acknowledge and accept the risks involved.
     parameter FORCE_PUSH_PULL = 0
 ) (
-    inout logic scl,
+    inout wire scl,
     input logic clk_in, // an arbitrary clock, used to derive the scl clock
     output logic bus_clear,
 
-    inout logic sda,
+    inout wire sda,
     input logic mode, // 0 = transmit, 1 = receive
 
     // These two flags are exclusive; a transfer can't continue if a new one is starting
