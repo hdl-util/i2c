@@ -1,4 +1,4 @@
-module master #(
+module i2c_master #(
     // 50 MHz is commonly available in many FPGAs. Must be at least 4 times the target scl rate.
     parameter INPUT_CLK_RATE = 50000000,
     // Targeted i2c bus frequency. Actual frequency depends on the slowest device.

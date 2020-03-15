@@ -1,4 +1,4 @@
 files = [
     "clock.sv",
-    "master.sv"
+    "i2c_master.sv"
 ]
