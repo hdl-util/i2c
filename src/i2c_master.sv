@@ -48,16 +48,19 @@ module i2c_master #(
 // Derives the desired i2c mode from target rate.
 localparam MODE = $unsigned(TARGET_SCL_RATE) <= 100000 ? 0 : $unsigned(TARGET_SCL_RATE) <= 400000 ? 1 : $unsigned(TARGET_SCL_RATE) <= 1000000 ? 2 : -1;
 
-localparam COUNTER_WIDTH = $clog2($unsigned(INPUT_CLK_RATE) / $unsigned(TARGET_SCL_RATE));
-localparam COUNTER_END = COUNTER_WIDTH'($ceil($unsigned(INPUT_CLK_RATE) / $unsigned(TARGET_SCL_RATE)) - 1);
+localparam COUNTER_END_REAL = $unsigned(INPUT_CLK_RATE) / $unsigned(TARGET_SCL_RATE);
+localparam COUNTER_WIDTH = $clog2(COUNTER_END_REAL);
+localparam COUNTER_END = COUNTER_WIDTH'(COUNTER_END_REAL % 1 == 0 ? COUNTER_END_REAL : COUNTER_END_REAL + 1);
 // Conforms to Table 10 tLOW, tHIGH for SCL clock.
 localparam COUNTER_HIGH = COUNTER_WIDTH'(MODE == 0 ? ( (COUNTER_WIDTH + 1)'(COUNTER_END) + 1) / 2 : (( (COUNTER_WIDTH + 2)'(COUNTER_END) + 1) * 2) / 3);
 // Conforms to Table 10 tr (rise time) for SCL clock.
-localparam COUNTER_RISE = COUNTER_WIDTH'($ceil($unsigned(INPUT_CLK_RATE) / 1.0E9 * $unsigned(MODE == 0 ? 1000 : MODE == 1 ? 300 : MODE == 2  ? 120 : 0)));
+localparam COUNTER_RISE_REAL = $unsigned(INPUT_CLK_RATE) / 1.0E9 * $unsigned(MODE == 0 ? 1000 : MODE == 1 ? 300 : MODE == 2  ? 120 : 0);
+localparam COUNTER_RISE = COUNTER_WIDTH'(COUNTER_RISE_REAL % 1 == 0 ? COUNTER_RISE_REAL : COUNTER_RISE_REAL + 1);
 
 // Bus clear event counter
-localparam WAIT_WIDTH = $clog2($unsigned(INPUT_CLK_RATE) / $unsigned(SLOWEST_DEVICE_RATE));
-localparam WAIT_END = WAIT_WIDTH'($ceil($unsigned(INPUT_CLK_RATE) / $unsigned(SLOWEST_DEVICE_RATE)) - 1);
+localparam WAIT_END_REAL = $unsigned(INPUT_CLK_RATE) / $unsigned(SLOWEST_DEVICE_RATE);
+localparam WAIT_WIDTH = $clog2(WAIT_END_REAL);
+localparam WAIT_END = COUNTER_WIDTH'(WAIT_END_REAL % 1 == 0 ? WAIT_END_REAL : WAIT_END_REAL + 1);
 
 logic [COUNTER_WIDTH-1:0] counter;
 // stick counter used to meet timing requirements
@@ -113,9 +116,9 @@ end
 // Conforms to Table 10 minimum setup/hold/bus free times.
 localparam TLOW_MIN = MODE == 0 ? 4.7 : MODE == 1 ? 1.3 : MODE == 2 ? 0.5 : 0; // in microseconds
 localparam THIGH_MIN = MODE == 0 ? 4.0 : MODE == 1 ? 0.6 : MODE == 2 ? 0.26 : 0; // in microseconds
-localparam COUNTER_SETUP_REPEATED_START = COUNTER_WIDTH'($floor($unsigned(INPUT_CLK_RATE) / 1.0E6 * TLOW_MIN));
+localparam COUNTER_SETUP_REPEATED_START = COUNTER_WIDTH'($unsigned(INPUT_CLK_RATE) / 1.0E6 * TLOW_MIN);
 localparam COUNTER_BUS_FREE = COUNTER_SETUP_REPEATED_START;
-localparam COUNTER_HOLD_REPEATED_START = COUNTER_WIDTH'($floor($unsigned(INPUT_CLK_RATE) / 1.0E6 * THIGH_MIN));
+localparam COUNTER_HOLD_REPEATED_START = COUNTER_WIDTH'($unsigned(INPUT_CLK_RATE) / 1.0E6 * THIGH_MIN);
 localparam COUNTER_SETUP_STOP = COUNTER_HOLD_REPEATED_START;
 
 localparam COUNTER_TRANSMIT = COUNTER_WIDTH'(COUNTER_HIGH / 2);
