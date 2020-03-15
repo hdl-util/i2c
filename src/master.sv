@@ -92,6 +92,11 @@ logic start_by_another_master = 1'b0;
 always @(sda === 1'bz or sda === 1'b0)
 begin
     if (scl === 1'bz)
+`else
+always @(posedge sda or negedge sda)
+begin
+    if (scl)
+`endif
     begin
         busy <= sda === 1'b0;
         if (sda === 1'b0)
@@ -100,23 +105,10 @@ begin
             $display("Master becomes free @ %d %d", counter, transaction_progress);
         // See Note 4 in Section 3.1.10
         // Should only trigger if a start occurs while this master was in the middle of something.
-        if (busy && sda == 1'b0 && transaction_progress != 4'd0 && transaction_progress != 4'd11 && MULTI_MASTER)
+        if (busy && !sda && !(transfer_start && (transaction_progress == 4'd1 || transaction_progress == 4'd11)) && MULTI_MASTER)
             start_by_another_master <= 1'd1;
     end
 end
-`else
-always @(posedge sda or negedge sda)
-begin
-    if (scl)
-    begin
-        busy <= !sda;
-        // See Note 4 in Section 3.1.10
-        // Should only trigger if a start occurs while this master was in the middle of something.
-        if (busy && !sda && transaction_progress != 4'd0 && transaction_progress != 4'd11 && MULTI_MASTER)
-            start_by_another_master <= 1'd1;
-    end
-end
-`endif
 
 // Conforms to Table 10 minimum setup/hold/bus free times.
 localparam TLOW_MIN = MODE == 0 ? 4.7 : MODE == 1 ? 1.3 : MODE == 2 ? 0.5 : 0; // in microseconds

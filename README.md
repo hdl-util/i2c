@@ -17,7 +17,7 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
     - [x] SDA
         - [x] Transmit
         - [x] Receive
-        - [x] Arbitration (multi-master)
+        - [x] Arbitration (multi-master) (untested)
             - [x] Basic Implementation
             - [x] Detect other masters triggering start before this master
         - [ ] Hotloading (not from i2c spec)
@@ -26,7 +26,7 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
                 - listen for WAIT_TIME_END to see if the clock is driven LOW
                 - if no: bus is free
                 - if yes: keep listening until a STOP or START
-            - [x] Other masters
+            - [x] Other masters (untested)
                 - [x] erroneous starts detected w/ start_err
     - [x] Port map
 - Slave
