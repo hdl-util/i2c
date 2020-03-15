@@ -10,6 +10,7 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
     - [x] SCL
         - [x] Clock stretching
         - [x] Clock synchronization (multi-master)
+            - [ ] Handle early counter reset
         - [x] Stuck LOW line detection (bus clear via HW reset or Power-On Reset)
         - [x] Release line when bus is free / in use by another master
         - [x] Conformity to stop/repeated start setup & hold times
@@ -18,7 +19,7 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
         - [x] Receive
         - [x] Arbitration (multi-master)
             - [x] Basic Implementation
-            - [ ] ~~Detect slower masters changing the value by looking at the value exactly at negedge(scl)~~
+            - [x] Detect other masters triggering start before this master
         - [ ] Hotloading (not from i2c spec)
             - [ ] Self
                 - compensating for jitter of wires connecting/disconnecting... (Schmitt enough?)
@@ -26,7 +27,7 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
                 - if no: bus is free
                 - if yes: keep listening until a STOP or START
             - [x] Other masters
-                - erroneous starts detected w/ start_err
+                - [x] erroneous starts detected w/ start_err
     - [x] Port map
 - Slave
     - [ ] SCL
@@ -41,5 +42,5 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
 
 ## Reference Documents
 
-* [I2C Specification](https://www.nxp.com/docs/en/user-guide/UM10204.pdf)
-* [Understanding the I2C Bus](http://www.ti.com/lit/an/slva704/slva704.pdf)
+- [I2C Specification](https://www.nxp.com/docs/en/user-guide/UM10204.pdf)
+- [Understanding the I2C Bus](http://www.ti.com/lit/an/slva704/slva704.pdf)

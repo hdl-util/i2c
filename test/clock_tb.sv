@@ -2,9 +2,9 @@ module clock_tb();
 
 
 
-localparam INPUT_CLK_RATE = $unsigned(500000);
+localparam INPUT_CLK_RATE = $unsigned(400000);
 localparam TARGET_SCL_RATE = $unsigned(100000);
-localparam SLOWEST_MASTER_RATE = $unsigned(10000);
+localparam SLOWEST_DEVICE_RATE = $unsigned(10000);
 
 logic scl_in = 1'bz; // Initially, no other master present
 
@@ -16,18 +16,25 @@ logic clk_in = 1'b0;
 always #2 clk_in = ~clk_in;
 logic bus_clear;
 
-localparam COUNTER_WIDTH = $clog2(INPUT_CLK_RATE / TARGET_SCL_RATE);
-localparam COUNTER_END = COUNTER_WIDTH'(INPUT_CLK_RATE / TARGET_SCL_RATE - 1);
+localparam MODE = $unsigned(TARGET_SCL_RATE) <= 100000 ? 0 : $unsigned(TARGET_SCL_RATE) <= 400000 ? 1 : $unsigned(TARGET_SCL_RATE) <= 1000000 ? 2 : -1;
+localparam COUNTER_WIDTH = $clog2($unsigned(INPUT_CLK_RATE) / $unsigned(TARGET_SCL_RATE));
+localparam COUNTER_END = COUNTER_WIDTH'($unsigned(INPUT_CLK_RATE) / $unsigned(TARGET_SCL_RATE) - 1);
 // Conforms to Table 10 tLOW, tHIGH for SCL clock.
-localparam COUNTER_HIGH = COUNTER_WIDTH'(COUNTER_END / 2);
-localparam WAIT_WIDTH = $clog2(2 * INPUT_CLK_RATE / SLOWEST_MASTER_RATE);
-localparam WAIT_END = WAIT_WIDTH'(2 * INPUT_CLK_RATE / SLOWEST_MASTER_RATE - 1);
-logic [$clog2(COUNTER_END)-1:0] counter;
-clock #(.COUNTER_WIDTH(COUNTER_WIDTH), .COUNTER_END(COUNTER_END), .COUNTER_HIGH(COUNTER_HIGH), .COUNTER_RISE(0), .MULTI_MASTER(1), .CLOCK_STRETCHING(1), .WAIT_WIDTH(WAIT_WIDTH), .WAIT_END(WAIT_END)) clock(.scl(scl), .clk_in(clk_in), .release_line(1'b0), .bus_clear(bus_clear), .counter(counter));
+localparam COUNTER_HIGH = COUNTER_WIDTH'(MODE == 0 ? ( (COUNTER_WIDTH + 1)'(COUNTER_END) + 1) / 2 : (( (COUNTER_WIDTH + 2)'(COUNTER_END) + 1) * 2) / 3);
+// Conforms to Table 10 tr (rise time) for SCL clock.
+localparam COUNTER_RISE = COUNTER_WIDTH'($ceil($unsigned(INPUT_CLK_RATE) / 1.0E9 * $unsigned(MODE == 0 ? 1000 : MODE == 1 ? 300 : MODE == 2  ? 120 : 0)));
 
+// Bus clear event counter
+localparam WAIT_WIDTH = $clog2(2 * $unsigned(INPUT_CLK_RATE) / $unsigned(SLOWEST_DEVICE_RATE));
+localparam WAIT_END = WAIT_WIDTH'(2 * $unsigned(INPUT_CLK_RATE) / $unsigned(SLOWEST_DEVICE_RATE) - 1);
+logic [COUNTER_WIDTH-1:0] counter;
+clock #(.COUNTER_WIDTH(COUNTER_WIDTH), .COUNTER_END(COUNTER_END), .COUNTER_HIGH(COUNTER_HIGH), .COUNTER_RISE(1), .MULTI_MASTER(1), .CLOCK_STRETCHING(1), .WAIT_WIDTH(WAIT_WIDTH), .WAIT_END(WAIT_END)) clock(.scl(scl), .clk_in(clk_in), .release_line(1'b0), .bus_clear(bus_clear), .counter(counter));
+
+logic [COUNTER_WIDTH-1:0] last_counter = COUNTER_HIGH;
 always @(posedge clk_in)
 begin
-  if (clock.counter < COUNTER_HIGH)
+  last_counter <= counter;
+  if (last_counter < COUNTER_HIGH)
     assert (scl === 1'b0) else $fatal(1, "High when counter hasn't risen: %b", scl);
   else if (!inoutmode)
   begin
@@ -37,29 +44,30 @@ end
 
 initial
 begin
-  assert(COUNTER_WIDTH == 3) else $fatal(1, "Counter width should be 3 but was %d", COUNTER_WIDTH); 
-  assert(COUNTER_END == 4) else $fatal(1, "Counter end should be 4 but was %d", COUNTER_END);
+  assert(COUNTER_WIDTH == 2) else $fatal(1, "Counter width should be 3 but was %d", COUNTER_WIDTH); 
+  assert(COUNTER_END == 3) else $fatal(1, "Counter end should be 4 but was %d", COUNTER_END);
   #100ns;
   $display("Testing bus clear");
-  wait (scl == 1'b0 && clk_in == 1'b0);
+  wait (!scl && !clk_in && counter == COUNTER_HIGH);
   scl_in <= 1'b0;
   inoutmode <= 1'b1;
-  #400ps;
+  #310ps;
   assert (!clock.bus_clear) else $fatal(1, "Bus clear asserted early");
-  #12ps;
+  #50ps;
   assert (clock.bus_clear) else $fatal(1, "Bus clear not asserted when SCL line stuck");
   scl_in <= 1'bz;
-  inoutmode <= 1'b1;
   #6ps;
   assert (!clock.bus_clear) else $fatal(1, "Bus clear asserted after SCL line released");
+  inoutmode <= 1'b0;
 
+  #1ns;
   $display("Testing reset");
-  #10ns;
-  wait (scl === 1'bz && clk_in == 1'b0);
+  wait (scl === 1'bz && !clk_in && counter == 0);
   scl_in <= 1'b0;
   inoutmode <= 1'b1;
-  #4ps;
-  assert (clock.counter == 0) else $fatal(1, "Counter did not reset after early drive to low");
+  wait (clk_in);
+  wait (!clk_in);
+  assert (counter == 1) else $fatal(1, "Counter did not reset after early drive to low");
   scl_in <= 1'bz;
   inoutmode <= 1'b0;
 

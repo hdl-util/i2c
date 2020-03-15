@@ -2,7 +2,7 @@ module master_tb();
 
 localparam INPUT_CLK_RATE = 400000;
 localparam TARGET_SCL_RATE = 100000;
-localparam SLOWEST_MASTER_RATE = 10000;
+localparam SLOWEST_DEVICE_RATE = 10000;
 
 logic sda_in = 1'bz;
 logic inoutmode = 1'b0;
@@ -32,7 +32,7 @@ master #(
     .TARGET_SCL_RATE(TARGET_SCL_RATE),
     .CLOCK_STRETCHING(0),
     .MULTI_MASTER(0),
-    .SLOWEST_MASTER_RATE(SLOWEST_MASTER_RATE),
+    .SLOWEST_DEVICE_RATE(SLOWEST_DEVICE_RATE),
     .FORCE_PUSH_PULL(0)
 ) master (
     .scl(scl),
