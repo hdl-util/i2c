@@ -63,8 +63,6 @@ logic [COUNTER_WIDTH-1:0] counter;
 // stick counter used to meet timing requirements
 logic [COUNTER_WIDTH-1:0] countdown = COUNTER_WIDTH'(0);
 
-// assume bus is free
-logic busy = 1'b0;
 logic [3:0] transaction_progress = 4'd0;
 
 logic release_line;
@@ -85,31 +83,6 @@ clock #(
 logic sda_internal = 1'b1;
 assign sda = sda_internal ? 1'bz : 1'b0;
 
-
-// See Section 3.1.4: START and STOP conditions
-logic start_by_another_master = 1'b0;
-`ifdef MODEL_TECH
-always @(sda === 1'bz or sda === 1'b0)
-begin
-    if (scl === 1'bz)
-`else
-always @(posedge sda or negedge sda)
-begin
-    if (scl)
-`endif
-    begin
-        busy <= sda === 1'b0;
-        if (sda === 1'b0)
-            $display("Master becomes busy @ %d %d", counter, transaction_progress);
-        else
-            $display("Master becomes free @ %d %d", counter, transaction_progress);
-        // See Note 4 in Section 3.1.10
-        // Should only trigger if a start occurs while this master was in the middle of something.
-        if (busy && !sda && !(transfer_start && (transaction_progress == 4'd1 || transaction_progress == 4'd11)) && MULTI_MASTER)
-            start_by_another_master <= 1'd1;
-    end
-end
-
 // Conforms to Table 10 minimum setup/hold/bus free times.
 localparam TLOW_MIN = MODE == 0 ? 4.7 : MODE == 1 ? 1.3 : MODE == 2 ? 0.5 : 0; // in microseconds
 localparam THIGH_MIN = MODE == 0 ? 4.0 : MODE == 1 ? 0.6 : MODE == 2 ? 0.26 : 0; // in microseconds
@@ -127,26 +100,45 @@ logic latched_transfer_continue;
 logic latched_transfer_start;
 
 assign data_rx = latched_data;
+
+// assume bus is free
+logic busy = 1'b0;
 assign transfer_ready = counter == COUNTER_HIGH && !busy && countdown == 0;
+
+// See Section 3.1.4: START and STOP conditions
+logic last_sda = 1'b1;
+always @(posedge clk_in)
+`ifdef MODEL_TECH
+    last_sda <= sda === 1'bz;
+`else
+    last_sda <= sda;
+`endif
+
+logic start_by_a_master;
+logic stop_by_a_master;
+`ifdef MODEL_TECH
+assign start_by_a_master = last_sda === 1'bz && !sda && scl === 1'bz;
+assign stop_by_a_master = !last_sda && sda === 1'bz && scl === 1'bz;
+`else
+assign start_by_a_master = last_sda && !sda && scl;
+assign stop_by_a_master = !last_sda && sda && scl;
+`endif
 
 always @(posedge clk_in)
 begin
-    start_err = start_by_another_master;
+    start_err = MULTI_MASTER && start_by_a_master && !(transaction_progress == 4'd0 || (transaction_progress == 4'd11 && transfer_start && counter == COUNTER_RECEIVE));
 
     // transmitter listens for loss of arbitration
-    // either another master won during a tranmission
-    // or another master issued a start condition before this master could
-    arbitration_err = MULTI_MASTER && ((counter == COUNTER_RECEIVE && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && sda != latched_data[4'd9 - transaction_progress] && !start_by_another_master)
-        || (counter == COUNTER_RECEIVE && countdown == COUNTER_WIDTH'(0) && transaction_progress == 4'd1 && busy && transfer_start));
+    arbitration_err = MULTI_MASTER && (counter == COUNTER_RECEIVE && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && sda != latched_data[4'd9 - transaction_progress] && !start_err);
 
-    transaction_complete = counter == COUNTER_RECEIVE - 1 && transaction_progress == 4'd10 && !start_by_another_master;
+    transaction_complete = counter == COUNTER_RECEIVE - 1 && transaction_progress == 4'd10 && !start_err;
     // transmitter notes whether ACK/NACK was received
     // receiver notes whether ACK/NACK was sent
     // treats a start by another master as as an ACK
     `ifdef MODEL_TECH
-        nack = transaction_complete && sda === 1'bz && !start_by_another_master;
+        nack = transaction_complete && sda === 1'bz && !start_err;
     `else
-        nack = transaction_complete && sda && !start_by_another_master;
+        nack = transaction_complete && sda && !start_err;
     `endif
 
     interrupt = start_err || arbitration_err || transaction_complete;
@@ -156,13 +148,17 @@ begin
     begin
         sda_internal <= 1'b1; // release line
         transaction_progress <= 4'd0;
-        start_by_another_master <= 1'b0; // synchronous reset of flag
         countdown <= COUNTER_WIDTH'(0);
+        busy <= 1'b1;
     end
     // Keep current state to meet setup/hold constraints in Table 10.
     else if (countdown != COUNTER_WIDTH'(0))
     begin
         countdown <= countdown - 1'b1;
+    end
+    else if (transaction_progress == 4'd0 && !(transfer_start && counter == COUNTER_HIGH) && MULTI_MASTER)
+    begin
+        busy <= busy ? !stop_by_a_master : start_by_a_master;
     end
     else if (counter == COUNTER_HIGH)
     begin
@@ -187,15 +183,16 @@ begin
     // "The data on the SDA line must be stable during the HIGH period of the clock."
     else if (counter == COUNTER_RECEIVE)
     begin
-        // Another master is doing a transaction (void messages tolerated, see Note 5 in Section 3.1.10)
-        if (transaction_progress == 4'd0 && MULTI_MASTER)
+        if (transaction_progress == 4'd0)
             sda_internal <= 1'b1;
         // START or repeated START condition
         else if ((transaction_progress == 4'd1 || transaction_progress == 4'd11) && transfer_start)
         begin
+            transaction_progress <= 4'd1;
             sda_internal <= 1'b0;
             if (transaction_progress == 4'd11) // Hold time padding
                 countdown <= COUNTER_HOLD_REPEATED_START - (COUNTER_END - COUNTER_RECEIVE);
+            busy <= 1'b1;
         end
         // See Section 3.1.5. Shift in data.
         else if (transaction_progress >= 4'd2 && transaction_progress < 4'd10 && latched_mode)
@@ -224,6 +221,7 @@ begin
             sda_internal <= 1'b1;
             transaction_progress <= 4'd0;
             countdown <= COUNTER_BUS_FREE - (COUNTER_END - COUNTER_RECEIVE);
+            busy <= 1'b0;
         end
     end
     // "The HIGH or LOW state of the data line can only change when the clock signal on the SCL line is LOW"
