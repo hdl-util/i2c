@@ -26,11 +26,11 @@ module i2c_master #(
     output logic bus_clear,
 
     inout wire sda,
-    input logic mode, // 0 = transmit, 1 = receive
 
     // These two flags are exclusive; a transfer can't continue if a new one is starting
     input logic transfer_start, // whether to begin a new transfer asap (repeated START, START)
-    input logic transfer_continue, // whether the transfer contains another transaction AFTER this transaction.
+    input logic transfer_continues, // whether the transfer contains another transaction AFTER this transaction.
+    input logic mode, // 0 = transmit, 1 = receive
     input logic [7:0] data_tx,
 
     output logic transfer_ready, // ready for a new transfer (bus is free)
@@ -96,8 +96,7 @@ localparam COUNTER_RECEIVE = COUNTER_WIDTH'(COUNTER_HIGH + COUNTER_RISE);
 
 logic latched_mode;
 logic [7:0] latched_data;
-logic latched_transfer_continue;
-logic latched_transfer_start;
+logic latched_transfer_continues;
 
 assign data_rx = latched_data;
 
@@ -117,8 +116,8 @@ always @(posedge clk_in)
 logic start_by_a_master;
 logic stop_by_a_master;
 `ifdef MODEL_TECH
-assign start_by_a_master = last_sda === 1'bz && !sda && scl === 1'bz;
-assign stop_by_a_master = !last_sda && sda === 1'bz && scl === 1'bz;
+assign start_by_a_master = last_sda === 1'bz && sda === 1'b0 && scl === 1'bz;
+assign stop_by_a_master = last_sda === 1'b0 && sda === 1'bz && scl === 1'bz;
 `else
 assign start_by_a_master = last_sda && !sda && scl;
 assign stop_by_a_master = !last_sda && sda && scl;
@@ -131,14 +130,14 @@ begin
     // transmitter listens for loss of arbitration
     arbitration_err = MULTI_MASTER && (counter == COUNTER_RECEIVE && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && sda != latched_data[4'd9 - transaction_progress] && !start_err);
 
-    transaction_complete = counter == COUNTER_RECEIVE - 1 && transaction_progress == 4'd10 && !start_err;
+    transaction_complete = counter == COUNTER_RECEIVE - 1 && transaction_progress == 4'd10 && !start_err && !arbitration_err;
     // transmitter notes whether ACK/NACK was received
     // receiver notes whether ACK/NACK was sent
     // treats a start by another master as as an ACK
     `ifdef MODEL_TECH
-        nack = transaction_complete && sda === 1'bz && !start_err;
+        nack = !(transaction_complete && sda === 1'b0);
     `else
-        nack = transaction_complete && sda && !start_err;
+        nack = !(transaction_complete && !sda);
     `endif
 
     interrupt = start_err || arbitration_err || transaction_complete;
@@ -170,13 +169,13 @@ begin
             latched_mode <= mode;
             // if (!mode) // Mode doesn't matter, save some logic cells
             latched_data <= data_tx;
-            latched_transfer_continue <= transfer_continue;
+            latched_transfer_continues <= transfer_continues;
         end
         if (transaction_progress == 4'd11) // Setup time padding for repeated start, stop
         begin
-            if (transfer_start)
+            if (transfer_start && COUNTER_SETUP_REPEATED_START > COUNTER_RECEIVE - COUNTER_HIGH)
                 countdown <= COUNTER_SETUP_REPEATED_START - (COUNTER_RECEIVE - COUNTER_HIGH);
-            else
+            else if (COUNTER_SETUP_STOP > COUNTER_RECEIVE - COUNTER_HIGH)
                 countdown <= COUNTER_SETUP_STOP - (COUNTER_RECEIVE - COUNTER_HIGH);
         end
     end
@@ -206,21 +205,21 @@ begin
         end
         // See Section 3.1.6. Transmitter got an acknowledge bit or receiver sent it.
         // transaction continues immediately in the next LOW, latch now
-        // delayed by a clock here so that user input after transaction_complete can be ready
-        else if (transaction_progress == 4'd10 && latched_transfer_continue)
+        else if (transaction_progress == 4'd10 && latched_transfer_continues)
         begin
             transaction_progress <= 4'd1;
             latched_mode <= mode;
             // if (!mode) // Mode doesn't matter, save some logic cells
             latched_data <= data_tx;
-            latched_transfer_continue <= transfer_continue;
+            latched_transfer_continues <= transfer_continues;
         end
         // STOP condition
         else if (transaction_progress == 4'd11 && !transfer_start)
         begin
             sda_internal <= 1'b1;
             transaction_progress <= 4'd0;
-            countdown <= COUNTER_BUS_FREE - (COUNTER_END - COUNTER_RECEIVE);
+            if (COUNTER_BUS_FREE > COUNTER_END - COUNTER_RECEIVE)
+                countdown <= COUNTER_BUS_FREE - (COUNTER_END - COUNTER_RECEIVE);
             busy <= 1'b0;
         end
     end
@@ -238,7 +237,7 @@ begin
         end
         // See Section 3.1.6. Expecting an acknowledge bit transfer in the next HIGH.
         else if (transaction_progress == 4'd9)
-            sda_internal <= !latched_mode || !latched_transfer_continue; // receiver sends ACK / NACK, transmitter releases line
+            sda_internal <= latched_mode ? !transfer_continues : 1'b1; // receiver sends ACK / NACK, transmitter releases line
         // See Section 3.1.4
         else if (transaction_progress == 4'd10)
             sda_internal <= transfer_start; // prepare for repeated START condition or STOP condition

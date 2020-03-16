@@ -17,7 +17,7 @@ always #2 clk_in = ~clk_in;
 logic bus_clear;
 logic mode = 1'b0;
 logic transfer_start = 1'b0;
-logic transfer_continue = 1'b0;
+logic transfer_continues = 1'b0;
 logic transfer_ready;
 logic interrupt;
 logic transaction_complete;
@@ -41,7 +41,7 @@ i2c_master #(
     .sda(sda),
     .mode(mode),
     .transfer_start(transfer_start),
-    .transfer_continue(transfer_continue),
+    .transfer_continues(transfer_continues),
     .transfer_ready(transfer_ready),
     .interrupt(interrupt),
     .transaction_complete(transaction_complete),
@@ -65,7 +65,7 @@ begin
     $display("Beginning transmission ending with NACK");
     mode <= 1'b0;
     transfer_start <= 1'b1;
-    transfer_continue <= 1'b0;
+    transfer_continues <= 1'b0;
     data_tx <= TEST1;
     wait (master.counter == (master.COUNTER_RECEIVE + 1) % (master.COUNTER_END + 1) && !clk_in);
     assert (master.busy) else $fatal(1, "Master should be busy");
@@ -81,7 +81,7 @@ begin
     assert (transaction_complete) else $fatal(1, "Transaction did not complete successfully");
     assert (nack) else $fatal(1, "Slave sent NACK, master should've noted it");
     transfer_start <= 1'b0;
-    transfer_continue <= 1'b0;
+    transfer_continues <= 1'b0;
 
 
     $display("Waiting for ready, counter is %d", master.counter);
@@ -89,7 +89,7 @@ begin
     $display("Beginning reception ending with NACK");
     mode <= 1'b1;
     transfer_start <= 1'b1;
-    transfer_continue <= 1'b0;
+    transfer_continues <= 1'b0;
     inoutmode <= 1'b1;
     wait (master.counter == (master.COUNTER_RECEIVE + 1) % (master.COUNTER_END + 1) && !clk_in);
     assert (master.busy) else $fatal(1, "Master should be busy");
@@ -108,7 +108,7 @@ begin
     assert (nack) else $fatal(1, "Master should've sent NACK");
     assert (data_rx == TEST1) else $fatal(1, "Expected %b, was %b", TEST1, data_rx);
     transfer_start <= 1'b0;
-    transfer_continue <= 1'b0;
+    transfer_continues <= 1'b0;
     
     
     
@@ -116,7 +116,7 @@ begin
     $display("\nBeginning bulk transmission");
     mode <= 1'b0;
     transfer_start <= 1'b1;
-    transfer_continue <= 1'b1;
+    transfer_continues <= 1'b1;
     data_tx <= TEST2[7:0];
     for (j = 0; j < 8; j++)
     begin
@@ -140,7 +140,7 @@ begin
         assert (transaction_complete) else $fatal(1, "Transaction did not complete successfully");
         assert (j == 7 ? nack : !nack) else $fatal(1, "Unexpected ACK/NACK for %d", j);
         transfer_start <= 1'b0;
-        transfer_continue <= 1'(j + 1 != 7);
+        transfer_continues <= 1'(j + 1 != 7);
         if (j != 7)
         begin
             TEST2 <= {8'd0, TEST2[63:8]};
@@ -153,7 +153,7 @@ begin
     $display("\nBeginning bulk reception");
     mode <= 1'b1;
     transfer_start <= 1'b1;
-    transfer_continue <= 1'b1;
+    transfer_continues <= 1'b1;
     for (j = 0; j < 8; j++)
     begin
         wait (master.counter == (master.COUNTER_RECEIVE + 1) % (master.COUNTER_END + 1) + (j == 0 ? 0 : 1) && !clk_in);
@@ -173,7 +173,7 @@ begin
         assert (transaction_complete) else $fatal(1, "Transaction did not complete successfully");
         assert (j == 7 ? nack : !nack) else $fatal(1, "Master sent unexpected ACK/NACK for %d", j);
         transfer_start <= 1'b0;
-        transfer_continue <= 1'(j + 1 != 7);
+        transfer_continues <= 1'(j + 1 != 7);
         if (j != 7)
         begin
             TEST3 <= {8'd0, TEST3[63:8]};
