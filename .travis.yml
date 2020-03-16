@@ -23,6 +23,8 @@ script:
     - export PATH=$PATH:/home/travis/intelFPGA/19.1/modelsim_ase/bin
     - cd ./sim/master_tb/ && hdlmake fetch && hdlmake && make
     - cd -
+    - cd ./sim/fast_master_tb/ && hdlmake fetch && hdlmake && make
+    - cd -
     - cd ./sim/clock_tb/ && hdlmake fetch && hdlmake && make
 
 cache:

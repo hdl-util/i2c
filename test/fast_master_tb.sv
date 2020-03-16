@@ -1,6 +1,6 @@
-module master_tb();
+module fast_master_tb();
 
-localparam INPUT_CLK_RATE = 400000;
+localparam INPUT_CLK_RATE = 48000000;
 localparam TARGET_SCL_RATE = 100000;
 localparam SLOWEST_DEVICE_RATE = 10000;
 
