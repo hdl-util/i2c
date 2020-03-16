@@ -66,7 +66,7 @@ logic [COUNTER_WIDTH-1:0] countdown = COUNTER_WIDTH'(0);
 logic [3:0] transaction_progress = 4'd0;
 
 logic release_line;
-assign release_line = transaction_progress == 4'd0 || countdown > 0;
+assign release_line = (transaction_progress == 4'd0 && counter == COUNTER_HIGH) || countdown > 0;
 
 clock #(
     .COUNTER_WIDTH(COUNTER_WIDTH),
@@ -189,7 +189,7 @@ begin
         begin
             transaction_progress <= 4'd1;
             sda_internal <= 1'b0;
-            if (transaction_progress == 4'd11) // Hold time padding
+            if (transaction_progress == 4'd11 && COUNTER_HOLD_REPEATED_START > (COUNTER_END - COUNTER_RECEIVE)) // Hold time padding
                 countdown <= COUNTER_HOLD_REPEATED_START - (COUNTER_END - COUNTER_RECEIVE);
             busy <= 1'b1;
         end
