@@ -2,9 +2,9 @@
 
 [![Build Status](https://travis-ci.org/hdl-util/i2c.svg?branch=master)](https://travis-ci.org/hdl-util/i2c)
 
-Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge cases
+Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge cases.
 
-## To-dos
+## To-do List
 
 - Master
     - [x] SCL
@@ -38,9 +38,14 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
     - [x] Fast-mode Plus
     - [ ] High-speed mode
     - [ ] Ultra Fast-mode
+- [ ] MIPI I3C
 
 
 ## Reference Documents
 
+These documents are not hosted here! They are available on Library Genesis and at other locations.
+
 - [I2C Specification](https://www.nxp.com/docs/en/user-guide/UM10204.pdf)
 - [Understanding the I2C Bus](http://www.ti.com/lit/an/slva704/slva704.pdf)
+- [MIPI I3C Specification](https://b-ok.cc/book/3710131/fc48ef)
+
