@@ -37,7 +37,7 @@ module i2c_master #(
 
     output logic interrupt = 1'b0, // A transaction has completed or an error occurred.
     output logic transaction_complete, // ready for a new transaction
-    output logic nack = 1'b0, // When a transaction is complete, whether ACK/NACK was received/sent for the last transaction (0 = ACK, 1 = NACK).
+    output logic nack, // When a transaction is complete, whether ACK/NACK was received/sent for the last transaction (0 = ACK, 1 = NACK).
     output logic [7:0] data_rx,
 
     // The below errors matter ONLY IF there are multiple masters on the bus
@@ -123,6 +123,15 @@ assign start_by_a_master = last_sda && !sda && scl;
 assign stop_by_a_master = !last_sda && sda && scl;
 `endif
 
+// transmitter notes whether ACK/NACK was received
+// receiver notes whether ACK/NACK was sent
+// treats a start by another master as as an ACK
+`ifdef MODEL_TECH
+assign nack = sda === 1'bz;
+`else
+assign nack = sda;
+`endif
+
 always @(posedge clk_in)
 begin
     start_err = MULTI_MASTER && start_by_a_master && !(transaction_progress == 4'd0 || (transaction_progress == 4'd11 && transfer_start && counter == COUNTER_RECEIVE));
@@ -130,15 +139,7 @@ begin
     // transmitter listens for loss of arbitration
     arbitration_err = MULTI_MASTER && (counter == COUNTER_RECEIVE && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && sda != latched_data[4'd9 - transaction_progress] && !start_err);
 
-    transaction_complete = counter == COUNTER_RECEIVE - 2 && transaction_progress == 4'd10 && !start_err && !arbitration_err;
-    // transmitter notes whether ACK/NACK was received
-    // receiver notes whether ACK/NACK was sent
-    // treats a start by another master as as an ACK
-    `ifdef MODEL_TECH
-        nack = !(transaction_complete && sda === 1'b0);
-    `else
-        nack = !(transaction_complete && !sda);
-    `endif
+    transaction_complete = counter == COUNTER_RECEIVE - 2 && transaction_progress == (COUNTER_RECEIVE - 2 == COUNTER_TRANSMIT ? 4'd9 : 4'd10) && !start_err && !arbitration_err;
 
     interrupt = start_err || arbitration_err || transaction_complete;
 
