@@ -130,7 +130,7 @@ begin
     // transmitter listens for loss of arbitration
     arbitration_err = MULTI_MASTER && (counter == COUNTER_RECEIVE && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && sda != latched_data[4'd9 - transaction_progress] && !start_err);
 
-    transaction_complete = counter == COUNTER_RECEIVE - 1 && transaction_progress == 4'd10 && !start_err && !arbitration_err;
+    transaction_complete = counter == COUNTER_RECEIVE - 2 && transaction_progress == 4'd10 && !start_err && !arbitration_err;
     // transmitter notes whether ACK/NACK was received
     // receiver notes whether ACK/NACK was sent
     // treats a start by another master as as an ACK
