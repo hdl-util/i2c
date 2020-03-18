@@ -4,7 +4,15 @@
 
 Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge cases.
 
-## To-do List
+## Usage
+
+1. Take files from src/ and add them to your own project. If you use hdlmake, you can add this repository itself as a remote module.
+1. Other helpful modules are also available in this GitHub organization.
+1. Consult the usage example in [i2c-demo](https://github.com/hdl-util/i2c-demo) for code that runs a demo over HDMI.
+1. Read through the parameters in console.sv and tailor any instantiations to your situation.
+1. Please create an issue if you run into a problem or have any questions.
+
+### To-do List
 
 - Master
     - [x] SCL
@@ -48,4 +56,3 @@ These documents are not hosted here! They are available on Library Genesis and a
 - [I2C Specification](https://www.nxp.com/docs/en/user-guide/UM10204.pdf)
 - [Understanding the I2C Bus](http://www.ti.com/lit/an/slva704/slva704.pdf)
 - [MIPI I3C Specification](https://b-ok.cc/book/3710131/fc48ef)
-
