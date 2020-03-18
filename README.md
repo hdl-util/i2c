@@ -6,7 +6,8 @@ Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge 
 
 ## Usage
 
-1. Take files from src/ and add them to your own project. If you use hdlmake, you can add this repository itself as a remote module.
+
+1. Take files from `src/` and add them to your own project. If you use [hdlmake](https://hdlmake.readthedocs.io/en/master/), you can add this repository itself as a remote module.
 1. Other helpful modules are also available in this GitHub organization.
 1. Consult the usage example in [i2c-demo](https://github.com/hdl-util/i2c-demo) for code that runs a demo over HDMI.
 1. Read through the parameters in `i2c_master.sv`/`i2c_slave.sv` and tailor any instantiations to your situation.
