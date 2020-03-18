@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.org/hdl-util/i2c.svg?branch=master)](https://travis-ci.org/hdl-util/i2c)
 
-Implementation of Inter-IC (I2C) bus master and slave, covering almost all edge cases.
+SystemVerilog code for [I2C](https://en.wikipedia.org/wiki/I%C2%B2C) master/slave on an [FPGA](https://simple.wikipedia.org/wiki/Field-programmable_gate_array).
 
 ## Usage
 
