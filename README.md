@@ -1,6 +1,6 @@
 # i2c
 
-[![Build Status](https://travis-ci.org/hdl-util/i2c.svg?branch=master)](https://travis-ci.org/hdl-util/i2c)
+[![Build Status](https://travis-ci.com/hdl-util/i2c.svg?branch=master)](https://travis-ci.com/hdl-util/i2c)
 
 SystemVerilog code for [I2C](https://en.wikipedia.org/wiki/I%C2%B2C) master/slave on an [FPGA](https://simple.wikipedia.org/wiki/Field-programmable_gate_array).
 
