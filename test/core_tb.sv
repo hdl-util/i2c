@@ -1,4 +1,4 @@
-module master_tb #(
+module core_tb #(
     parameter INPUT_CLK_RATE,
     parameter TARGET_SCL_RATE = 100000,
     parameter SLOWEST_DEVICE_RATE = 10000
