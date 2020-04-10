@@ -26,7 +26,7 @@ logic arbitration_err;
 logic [7:0] data_tx = 8'd0;
 logic [7:0] data_rx;
 
-i2c_master #(
+i2c_core #(
     .INPUT_CLK_RATE(INPUT_CLK_RATE),
     .TARGET_SCL_RATE(TARGET_SCL_RATE),
     .CLOCK_STRETCHING(0),

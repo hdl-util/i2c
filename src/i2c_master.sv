@@ -27,222 +27,82 @@ module i2c_master #(
 
     inout wire sda,
 
-    // These two flags are exclusive; a transfer can't continue if a new one is starting
+    // 7-bit device address followed by 1 bit mode (1 = read, 0 = write)
+    input logic [7:0] address,
+
+    // When starting a single-byte transfer, only transfer_start should be true
+    // When starting a multi-byte transfer, both transfer_start and transfer_continues should be true
+    // When doing a repeated start after this upcoming transaction, only transfer_start should be true
     input logic transfer_start, // whether to begin a new transfer asap (repeated START, START)
     input logic transfer_continues, // whether the transfer contains another transaction AFTER this transaction.
-    input logic mode, // 0 = transmit, 1 = receive
     input logic [7:0] data_tx,
 
     output logic transfer_ready, // ready for a new transfer (bus is free)
 
-    output logic interrupt = 1'b0, // A transaction has completed or an error occurred.
+    output logic interrupt, // A transaction has completed or an error occurred.
     output logic transaction_complete, // ready for a new transaction
     output logic nack, // When a transaction is complete, whether ACK/NACK was received/sent for the last transaction (0 = ACK, 1 = NACK).
     output logic [7:0] data_rx,
 
+    output logic address_err, // Address was not acknowledged by a slave
+
     // The below errors matter ONLY IF there are multiple masters on the bus
-    output logic start_err = 1'd0, // Another master illegally issued a START condition while the bus was busy
-    output logic arbitration_err = 1'b0 // Another master won the transaction due to arbitration, (or issued a START condition, when the user of this master wanted to)
+    output logic start_err, // Another master illegally issued a START condition while the bus was busy
+    output logic arbitration_err // Another master won the transaction due to arbitration, (or issued a START condition, when the user of this master wanted to)
 );
 
-// Derives the desired i2c mode from target rate.
-localparam MODE = $unsigned(TARGET_SCL_RATE) <= 100000 ? 0 : $unsigned(TARGET_SCL_RATE) <= 400000 ? 1 : $unsigned(TARGET_SCL_RATE) <= 1000000 ? 2 : -1;
+// Transfer must continue after sending I2C address
+logic internal_transfer_continues;
+assign internal_transfer_continues = instantaneous_state ? transfer_continues : 1'b1;
 
-localparam COUNTER_WIDTH = $clog2(($unsigned(INPUT_CLK_RATE) - 1) / $unsigned(TARGET_SCL_RATE));
-localparam COUNTER_END = COUNTER_WIDTH'(($unsigned(INPUT_CLK_RATE) - 1) / $unsigned(TARGET_SCL_RATE));
-// Conforms to Table 10 tLOW, tHIGH for SCL clock.
-localparam COUNTER_HIGH = COUNTER_WIDTH'(MODE == 0 ? ( (COUNTER_WIDTH + 1)'(COUNTER_END) + 1) / 2 : (( (COUNTER_WIDTH + 2)'(COUNTER_END) + 1) * 2) / 3);
-// Conforms to Table 10 tr (rise time) for SCL clock.
-localparam COUNTER_RISE = COUNTER_WIDTH'(($unsigned(INPUT_CLK_RATE) - 1) / 1.0E9 * $unsigned(MODE == 0 ? 1000 : MODE == 1 ? 300 : MODE == 2  ? 120 : 0) + 1);
+// Don't send a complete until after the I2C address is sent
+logic internal_transaction_complete;
+assign transaction_complete = state ? internal_transaction_complete : 1'b0;
 
-// Bus clear event counter
-localparam WAIT_WIDTH = $clog2(($unsigned(INPUT_CLK_RATE) - 1) / $unsigned(SLOWEST_DEVICE_RATE));
-localparam WAIT_END = WAIT_WIDTH'(($unsigned(INPUT_CLK_RATE) - 1) / $unsigned(SLOWEST_DEVICE_RATE));
+// TX address, either TX/RX the rest by user command
+logic mode;
+assign mode = instantaneous_state ? address[0] : 1'b0;
 
-logic [COUNTER_WIDTH-1:0] counter;
-// stick counter used to meet timing requirements
-logic [COUNTER_WIDTH-1:0] countdown = COUNTER_WIDTH'(0);
+// Transmit address, then user data
+logic internal_data_tx;
+assign internal_data_tx = instantaneous_state ? data_tx : address;
 
-logic [3:0] transaction_progress = 4'd0;
+// First transmit transaction completes but got a NACK
+assign address_err = state ? 1'b0 : internal_transaction_complete && nack;
 
-logic release_line;
-assign release_line = (transaction_progress == 4'd0 && counter == COUNTER_HIGH) || countdown > 0;
+// 0 = address transfer
+// 1 = regular transfer
+logic state = 1'b0;
 
-clock #(
-    .COUNTER_WIDTH(COUNTER_WIDTH),
-    .COUNTER_END(COUNTER_END),
-    .COUNTER_HIGH(COUNTER_HIGH),
-    .COUNTER_RISE(COUNTER_RISE),
-    .MULTI_MASTER(MULTI_MASTER),
+// Transition to 1 after address sent, transition back to 0 after transfer completes
+logic instantaneous_state;
+assign instantaneous_state = state ? !(interrupt && transaction_complete && !transfer_continues) : (interrupt && transaction_complete);
+
+always @(posedge clk_in) state <= instantaneous_state;
+
+i2c_core #(
+    .INPUT_CLK_RATE(INPUT_CLK_RATE),
+    .TARGET_SCL_RATE(TARGET_SCL_RATE),
     .CLOCK_STRETCHING(CLOCK_STRETCHING),
-    .WAIT_WIDTH(WAIT_WIDTH),
-    .WAIT_END(WAIT_END),
-    .PUSH_PULL(!CLOCK_STRETCHING && !MULTI_MASTER && FORCE_PUSH_PULL)
-) clock (.scl(scl), .clk_in(clk_in), .release_line(release_line), .bus_clear(bus_clear), .counter(counter));
-
-logic sda_internal = 1'b1;
-assign sda = sda_internal ? 1'bz : 1'b0;
-
-// Conforms to Table 10 minimum setup/hold/bus free times.
-localparam TLOW_MIN = MODE == 0 ? 4.7 : MODE == 1 ? 1.3 : MODE == 2 ? 0.5 : 0; // in microseconds
-localparam THIGH_MIN = MODE == 0 ? 4.0 : MODE == 1 ? 0.6 : MODE == 2 ? 0.26 : 0; // in microseconds
-localparam COUNTER_SETUP_REPEATED_START = COUNTER_WIDTH'($unsigned(INPUT_CLK_RATE) / 1.0E6 * TLOW_MIN);
-localparam COUNTER_BUS_FREE = COUNTER_SETUP_REPEATED_START;
-localparam COUNTER_HOLD_REPEATED_START = COUNTER_WIDTH'($unsigned(INPUT_CLK_RATE) / 1.0E6 * THIGH_MIN);
-localparam COUNTER_SETUP_STOP = COUNTER_HOLD_REPEATED_START;
-
-localparam COUNTER_TRANSMIT = COUNTER_WIDTH'(COUNTER_HIGH / 2);
-localparam COUNTER_RECEIVE = COUNTER_WIDTH'(COUNTER_HIGH + COUNTER_RISE);
-
-logic latched_mode;
-logic [7:0] latched_data;
-logic latched_transfer_continues;
-
-assign data_rx = latched_data;
-
-// assume bus is free
-logic busy = 1'b0;
-assign transfer_ready = counter == COUNTER_HIGH && !busy && countdown == 0;
-
-// See Section 3.1.4: START and STOP conditions
-logic last_sda = 1'b1;
-always @(posedge clk_in)
-`ifdef MODEL_TECH
-    last_sda <= sda === 1'bz;
-`else
-    last_sda <= sda;
-`endif
-
-logic start_by_a_master;
-logic stop_by_a_master;
-`ifdef MODEL_TECH
-assign start_by_a_master = last_sda === 1'bz && sda === 1'b0 && scl === 1'bz;
-assign stop_by_a_master = last_sda === 1'b0 && sda === 1'bz && scl === 1'bz;
-`else
-assign start_by_a_master = last_sda && !sda && scl;
-assign stop_by_a_master = !last_sda && sda && scl;
-`endif
-
-// transmitter notes whether ACK/NACK was received
-// receiver notes whether ACK/NACK was sent
-// treats a start by another master as as an ACK
-`ifdef MODEL_TECH
-assign nack = sda === 1'bz;
-`else
-assign nack = sda;
-`endif
-
-always @(posedge clk_in)
-begin
-    start_err = MULTI_MASTER && start_by_a_master && !(transaction_progress == 4'd0 || (transaction_progress == 4'd11 && transfer_start && counter == COUNTER_RECEIVE));
-
-    // transmitter listens for loss of arbitration
-    arbitration_err = MULTI_MASTER && (counter == COUNTER_RECEIVE && transaction_progress >= 4'd2 && transaction_progress < 4'd10 && !latched_mode && sda != latched_data[4'd9 - transaction_progress] && !start_err);
-
-    transaction_complete = counter == COUNTER_RECEIVE - 2 && transaction_progress == (COUNTER_RECEIVE - 2 == COUNTER_TRANSMIT ? 4'd9 : 4'd10) && !start_err && !arbitration_err;
-
-    interrupt = start_err || arbitration_err || transaction_complete;
-
-    // See Note 4 in Section 3.1.10
-    if (start_err || arbitration_err)
-    begin
-        sda_internal <= 1'b1; // release line
-        transaction_progress <= 4'd0;
-        countdown <= COUNTER_WIDTH'(0);
-        busy <= 1'b1;
-    end
-    // Keep current state to meet setup/hold constraints in Table 10.
-    else if (countdown != COUNTER_WIDTH'(0))
-    begin
-        countdown <= countdown - 1'b1;
-    end
-    else if (transaction_progress == 4'd0 && !(transfer_start && counter == COUNTER_HIGH) && MULTI_MASTER)
-    begin
-        busy <= busy ? !stop_by_a_master : start_by_a_master;
-    end
-    else if (counter == COUNTER_HIGH)
-    begin
-        if ((transaction_progress == 4'd0 || transaction_progress == 4'd11) && transfer_start)
-        begin
-            if (transaction_progress == 4'd0)
-                transaction_progress <= 4'd1;
-
-            latched_mode <= mode;
-            // if (!mode) // Mode doesn't matter, save some logic cells
-            latched_data <= data_tx;
-            latched_transfer_continues <= transfer_continues;
-        end
-        if (transaction_progress == 4'd11) // Setup time padding for repeated start, stop
-        begin
-            if (transfer_start && COUNTER_SETUP_REPEATED_START > COUNTER_RECEIVE - COUNTER_HIGH)
-                countdown <= COUNTER_SETUP_REPEATED_START - (COUNTER_RECEIVE - COUNTER_HIGH);
-            else if (COUNTER_SETUP_STOP > COUNTER_RECEIVE - COUNTER_HIGH)
-                countdown <= COUNTER_SETUP_STOP - (COUNTER_RECEIVE - COUNTER_HIGH);
-        end
-    end
-    // "The data on the SDA line must be stable during the HIGH period of the clock."
-    else if (counter == COUNTER_RECEIVE)
-    begin
-        if (transaction_progress == 4'd0)
-            sda_internal <= 1'b1;
-        // START or repeated START condition
-        else if ((transaction_progress == 4'd1 || transaction_progress == 4'd11) && transfer_start)
-        begin
-            transaction_progress <= 4'd1;
-            sda_internal <= 1'b0;
-            if (transaction_progress == 4'd11 && COUNTER_HOLD_REPEATED_START > (COUNTER_END - COUNTER_RECEIVE)) // Hold time padding
-                countdown <= COUNTER_HOLD_REPEATED_START - (COUNTER_END - COUNTER_RECEIVE);
-            busy <= 1'b1;
-        end
-        // See Section 3.1.5. Shift in data.
-        else if (transaction_progress >= 4'd2 && transaction_progress < 4'd10 && latched_mode)
-        begin
-            `ifdef MODEL_TECH
-                latched_data[4'd9 - transaction_progress] <= sda === 1'bz;
-            `else
-                latched_data[4'd9 - transaction_progress] <= sda;
-            `endif
-                sda_internal <= 1'b1; // Should help reduce slave rise time
-        end
-        // See Section 3.1.6. Transmitter got an acknowledge bit or receiver sent it.
-        // transaction continues immediately in the next LOW, latch now
-        else if (transaction_progress == 4'd10 && latched_transfer_continues)
-        begin
-            transaction_progress <= 4'd1;
-            latched_mode <= mode;
-            // if (!mode) // Mode doesn't matter, save some logic cells
-            latched_data <= data_tx;
-            latched_transfer_continues <= transfer_continues;
-        end
-        // STOP condition
-        else if (transaction_progress == 4'd11 && !transfer_start)
-        begin
-            sda_internal <= 1'b1;
-            transaction_progress <= 4'd0;
-            if (COUNTER_BUS_FREE > COUNTER_END - COUNTER_RECEIVE)
-                countdown <= COUNTER_BUS_FREE - (COUNTER_END - COUNTER_RECEIVE);
-            busy <= 1'b0;
-        end
-    end
-    // "The HIGH or LOW state of the data line can only change when the clock signal on the SCL line is LOW"
-    else if (counter == COUNTER_TRANSMIT && transaction_progress != 4'd0)
-    begin
-        transaction_progress <= transaction_progress + 4'd1;
-        // See Section 3.1.5. Shift out data.
-        if (transaction_progress < 4'd9)
-        begin
-            if (!latched_mode)
-                sda_internal <= latched_data[4'd8 - transaction_progress];
-            else
-                sda_internal <= 1'b1; // release line for RX
-        end
-        // See Section 3.1.6. Expecting an acknowledge bit transfer in the next HIGH.
-        else if (transaction_progress == 4'd9)
-            sda_internal <= latched_mode ? !transfer_continues : 1'b1; // receiver sends ACK / NACK, transmitter releases line
-        // See Section 3.1.4
-        else if (transaction_progress == 4'd10)
-            sda_internal <= transfer_start; // prepare for repeated START condition or STOP condition
-    end
-end
+    .MULTI_MASTER(MULTI_MASTER),
+    .SLOWEST_DEVICE_RATE(SLOWEST_DEVICE_RATE),
+    .FORCE_PUSH_PULL(FORCE_PUSH_PULL)
+) core (
+    .scl(scl),
+    .clk_in(clk_in),
+    .bus_clear(bus_clear),
+    .sda(sda),
+    .transfer_start(transfer_start),
+    .transfer_continues(internal_transfer_continues),
+    .mode(mode),
+    .data_tx(internal_data_tx)
+    .transfer_ready(transfer_ready),
+    .interrupt(interrupt),
+    .transaction_complete(internal_transaction_complete),
+    .nack(nack),
+    .data_rx(data_rx),
+    .start_err(start_err),
+    .arbitration_err(arbitration_err)
+);
 
 endmodule
