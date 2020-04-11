@@ -51,24 +51,7 @@ module i2c_master #(
     output logic arbitration_err // Another master won the transaction due to arbitration, (or issued a START condition, when the user of this master wanted to)
 );
 
-// Transfer must continue after sending I2C address
-logic internal_transfer_continues;
-assign internal_transfer_continues = instantaneous_state ? transfer_continues : 1'b1;
-
-// Don't send a complete until after the I2C address is sent
 logic internal_transaction_complete;
-assign transaction_complete = state ? internal_transaction_complete : 1'b0;
-
-// TX address, either TX/RX the rest by user command
-logic mode;
-assign mode = instantaneous_state ? address[0] : 1'b0;
-
-// Transmit address, then user data
-logic internal_data_tx;
-assign internal_data_tx = instantaneous_state ? data_tx : address;
-
-// First transmit transaction completes but got a NACK
-assign address_err = state ? 1'b0 : internal_transaction_complete && nack;
 
 // 0 = address transfer
 // 1 = regular transfer
@@ -76,7 +59,25 @@ logic state = 1'b0;
 
 // Transition to 1 after address sent, transition back to 0 after transfer completes
 logic instantaneous_state;
-assign instantaneous_state = state ? !(interrupt && transaction_complete && !transfer_continues) : (interrupt && transaction_complete);
+assign instantaneous_state = state ? !(transfer_ready || transfer_start) : (interrupt && internal_transaction_complete);
+
+// Transfer must continue after sending I2C address
+logic internal_transfer_continues;
+assign internal_transfer_continues = instantaneous_state ? transfer_continues : 1'b1;
+
+// Don't send a complete until after the I2C address is sent
+assign transaction_complete = state ? internal_transaction_complete : 1'b0;
+
+// TX address, either TX/RX the rest by user command
+logic mode;
+assign mode = instantaneous_state ? address[0] : 1'b0;
+
+// Transmit address, then user data
+logic [7:0] internal_data_tx;
+assign internal_data_tx = instantaneous_state ? data_tx : address;
+
+// First transmit transaction completes but got a NACK
+assign address_err = state ? 1'b0 : internal_transaction_complete && nack;
 
 always @(posedge clk_in) state <= instantaneous_state;
 
@@ -95,7 +96,7 @@ i2c_core #(
     .transfer_start(transfer_start),
     .transfer_continues(internal_transfer_continues),
     .mode(mode),
-    .data_tx(internal_data_tx)
+    .data_tx(internal_data_tx),
     .transfer_ready(transfer_ready),
     .interrupt(interrupt),
     .transaction_complete(internal_transaction_complete),

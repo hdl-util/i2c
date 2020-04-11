@@ -54,8 +54,8 @@ i2c_core #(
 integer i, j;
 
 logic [7:0] TEST1 = 8'b10110100;
-logic [63:0] TEST2 = 128'hFEEDFACECAFEBEEF;
-logic [63:0] TEST3 = 128'hFAC3B00CBAAAAAAD;
+logic [63:0] TEST2 = 64'hFEEDFACECAFEBEEF;
+logic [63:0] TEST3 = 64'hFAC3B00CBAAAAAAD;
 
 initial
 begin
