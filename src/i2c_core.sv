@@ -206,14 +206,20 @@ begin
                 sda_internal <= 1'b1; // Should help reduce slave rise time
         end
         // See Section 3.1.6. Transmitter got an acknowledge bit or receiver sent it.
-        // transaction continues immediately in the next LOW, latch now
+        // transfer continues immediately in the next LOW, latch now
+        // refuses to continue the transfer if receiver got a NACK
         else if (transaction_progress == 4'd10 && latched_transfer_continues)
         begin
-            transaction_progress <= 4'd1;
-            latched_mode <= mode;
-            // if (!mode) // Mode doesn't matter, save some logic cells
-            latched_data <= data_tx;
-            latched_transfer_continues <= transfer_continues;
+            if (!mode && nack)
+                transaction_progress <= 4'd11; // TODO: if user set transfer_start when there's a NACK (they shouldn't) then there will be a repeated start
+            else
+            begin
+                transaction_progress <= 4'd1;
+                latched_mode <= mode;
+                // if (!mode) // Mode doesn't matter, save some logic cells
+                latched_data <= data_tx;
+                latched_transfer_continues <= transfer_continues;
+            end
         end
         // STOP condition
         else if (transaction_progress == 4'd11 && !transfer_start)
