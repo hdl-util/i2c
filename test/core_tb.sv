@@ -195,13 +195,11 @@ begin
         wait (interrupt && !clk_in);
         assert (transaction_complete) else $fatal(1, "Transaction did not complete successfully");
         assert (j == 7 ? nack : !nack) else $fatal(1, "Master sent unexpected ACK/NACK for %d", j);
+        assert (data_rx == TEST3[7:0]) else $fatal(1, "Data did not reach data_rx");
         transfer_start <= 1'b0;
         transfer_continues <= 1'(j + 1 != 7);
         if (j != 7)
-        begin
             TEST3 <= {8'd0, TEST3[63:8]};
-            data_tx <= TEST3[15:8];
-        end
     end
 
     wait(transfer_ready && !clk_in);
