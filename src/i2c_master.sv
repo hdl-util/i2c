@@ -51,19 +51,26 @@ module i2c_master #(
     output logic arbitration_err // Another master won the transaction due to arbitration, (or issued a START condition, when the user of this master wanted to)
 );
 
+logic internal_interrupt;
 logic internal_transaction_complete;
 
 // 0 = address transfer
 // 1 = regular transfer
 logic state = 1'b0;
 
+logic just_interrupted = 1'd0;
+always @(posedge clk_in) just_interrupted <= interrupt;
+
 // Transition to 1 after address sent, transition back to 0 after transfer completes
 logic instantaneous_state;
-assign instantaneous_state = state ? !(transfer_ready || transfer_start) : (interrupt && internal_transaction_complete);
+assign instantaneous_state = state ? !(transfer_ready || (transfer_start && just_interrupted)) : (internal_interrupt && internal_transaction_complete);
 
 // Transfer must continue after sending I2C address
 logic internal_transfer_continues;
 assign internal_transfer_continues = instantaneous_state ? transfer_continues : 1'b1;
+
+
+assign interrupt = internal_interrupt && (state == 1'd1 || address_err);
 
 // Don't send a complete until after the I2C address is sent
 assign transaction_complete = state ? internal_transaction_complete : 1'b0;
@@ -98,7 +105,7 @@ i2c_core #(
     .mode(mode),
     .data_tx(internal_data_tx),
     .transfer_ready(transfer_ready),
-    .interrupt(interrupt),
+    .interrupt(internal_interrupt),
     .transaction_complete(internal_transaction_complete),
     .nack(nack),
     .data_rx(data_rx),
