@@ -70,7 +70,8 @@ begin
         $display("Beginning bulk transmission");
         transfer_start <= 1'b1;
         transfer_continues <= 1'b1;
-        address <= TEST2[7:0];
+        address <= TEST2_CONST[7:0];
+        if (k != 0) wait (master.core.transaction_progress == 4'd11);
 
         for (j = 0; j < 8; j++)
         begin
@@ -90,7 +91,7 @@ begin
             end
             inoutmode <= 1'b1;
             sda_in <= j == 7 ? 1'bz : 1'b0; // NACK or ACK
-            wait (interrupt && !clk_in);
+            wait ((j == 0 ? master.internal_interrupt : interrupt) && !clk_in);
             assert (j == 0 ? master.internal_transaction_complete : transaction_complete) else $fatal(1, "Transaction did not complete successfully");
             assert (j == 7 ? nack : !nack) else $fatal(1, "Unexpected ACK/NACK for %d", j);
             transfer_start <= 1'b0;
@@ -103,9 +104,9 @@ begin
         end
 
         TEST2 <= TEST2_CONST;
-        wait (transfer_ready && !clk_in);
-
     end
+
+    wait (transfer_ready && !clk_in);
 
     $display("\nBeginning bulk reception");
     transfer_start <= 1'b1;
@@ -126,7 +127,6 @@ begin
         begin
             inoutmode <= 1'b1;
         end
-
         for (i = 0; i < 8; i++)
         begin
             if (j == 0)
@@ -149,7 +149,7 @@ begin
         if (j == 0)
         begin
             sda_in <= 1'b0;
-            wait (interrupt && !clk_in);
+            wait (master.internal_interrupt && !clk_in);
             assert (master.internal_transaction_complete) else $fatal(1, "Address transmit did not complete successfully");
         end
         else
@@ -165,8 +165,6 @@ begin
         if (j != 7)
             TEST3 <= {8'd0, TEST3[63:8]};
     end
-
-    wait(transfer_ready && !clk_in);
 
     $finish;
 end
