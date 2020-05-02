@@ -1,25 +1,25 @@
 module i2c_master #(
     // 50 MHz is commonly available in many FPGAs. Must be at least 4 times the target scl rate.
-    parameter INPUT_CLK_RATE = 50000000,
+    parameter int INPUT_CLK_RATE = 50000000,
     // Targeted i2c bus frequency. Actual frequency depends on the slowest device.
-    parameter TARGET_SCL_RATE = 100000,
+    parameter int TARGET_SCL_RATE = 100000,
 
     // Is a slave on the bus capable of clock stretching?
     // If unsure, it's safer to assume yes.
-    parameter CLOCK_STRETCHING = 1,
+    parameter bit CLOCK_STRETCHING = 1,
 
     // Are there multiple masters?
     // If unsure, it's safer to assume yes, but more efficient to assume no.
-    parameter MULTI_MASTER = 0,
+    parameter bit MULTI_MASTER = 0,
 
     // Detecting a stuck state depends on knowing how slow the slowest device is.
-    parameter SLOWEST_DEVICE_RATE = 100,
+    parameter int SLOWEST_DEVICE_RATE = 100,
 
     // "For a single master application, the master’s SCL output can be a push-pull driver design if there are no devices on the bus which would stretch the clock."
     // When using a push-pull driver, driving SCL HIGH while another device is driving it LOW will create a short circuit, damaging your FPGA.
     // If you enable this, you must be certain that it will not happen.
     // By doing so, you acknowledge and accept the risks involved.
-    parameter FORCE_PUSH_PULL = 0
+    parameter bit FORCE_PUSH_PULL = 0
 ) (
     inout wire scl,
     input logic clk_in, // an arbitrary clock, used to derive the scl clock
@@ -86,7 +86,7 @@ assign internal_data_tx = instantaneous_state ? data_tx : address;
 // First transmit transaction completes but got a NACK
 assign address_err = state ? 1'b0 : internal_transaction_complete && nack;
 
-always @(posedge clk_in) state <= instantaneous_state;
+always_ff @(posedge clk_in) state <= instantaneous_state;
 
 i2c_core #(
     .INPUT_CLK_RATE(INPUT_CLK_RATE),

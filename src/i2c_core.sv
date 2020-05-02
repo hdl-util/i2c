@@ -1,25 +1,25 @@
 module i2c_core #(
     // 50 MHz is commonly available in many FPGAs. Must be at least 4 times the target scl rate.
-    parameter INPUT_CLK_RATE,
+    parameter int INPUT_CLK_RATE,
     // Targeted i2c bus frequency. Actual frequency depends on the slowest device.
-    parameter TARGET_SCL_RATE,
+    parameter int TARGET_SCL_RATE,
 
     // Is a slave on the bus capable of clock stretching?
     // If unsure, it's safer to assume yes.
-    parameter CLOCK_STRETCHING,
+    parameter bit CLOCK_STRETCHING,
 
     // Are there multiple masters?
     // If unsure, it's safer to assume yes, but more efficient to assume no.
-    parameter MULTI_MASTER,
+    parameter bit MULTI_MASTER,
 
     // Detecting a stuck state depends on knowing how slow the slowest device is.
-    parameter SLOWEST_DEVICE_RATE,
+    parameter int SLOWEST_DEVICE_RATE,
 
     // "For a single master application, the master’s SCL output can be a push-pull driver design if there are no devices on the bus which would stretch the clock."
     // When using a push-pull driver, driving SCL HIGH while another device is driving it LOW will create a short circuit, damaging your FPGA.
     // If you enable this, you must be certain that it will not happen.
     // By doing so, you acknowledge and accept the risks involved.
-    parameter FORCE_PUSH_PULL
+    parameter bit FORCE_PUSH_PULL
 ) (
     inout wire scl,
     input logic clk_in, // an arbitrary clock, used to derive the scl clock
@@ -107,7 +107,7 @@ assign transfer_ready = counter == COUNTER_HIGH && !busy && countdown == 0;
 
 // See Section 3.1.4: START and STOP conditions
 logic last_sda = 1'b1;
-always @(posedge clk_in)
+always_ff @(posedge clk_in)
 `ifdef MODEL_TECH
     last_sda <= sda === 1'bz;
 `else
@@ -133,7 +133,7 @@ assign nack = sda === 1'bz;
 assign nack = sda;
 `endif
 
-always @(posedge clk_in)
+always_ff @(posedge clk_in)
 begin
     start_err = MULTI_MASTER && start_by_a_master && !(transaction_progress == 4'd0 || (transaction_progress == 4'd11 && transfer_start && counter == COUNTER_RECEIVE));
 
@@ -207,19 +207,14 @@ begin
         end
         // See Section 3.1.6. Transmitter got an acknowledge bit or receiver sent it.
         // transfer continues immediately in the next LOW, latch now
-        // refuses to continue the transfer if receiver got a NACK
-        else if (transaction_progress == 4'd10 && latched_transfer_continues)
+        // refuses to continue the transfer if transmitter got a NACK (TODO: there should be no transfer_start here, it could be set but it doesn't make sense to set it)
+        else if (transaction_progress == 4'd10 && latched_transfer_continues && (mode || !nack))
         begin
-            if (!mode && nack)
-                transaction_progress <= 4'd11; // TODO: if user set transfer_start when there's a NACK (they shouldn't) then there will be a repeated start
-            else
-            begin
-                transaction_progress <= 4'd1;
-                latched_mode <= mode;
-                // if (!mode) // Mode doesn't matter, save some logic cells
-                latched_data <= data_tx;
-                latched_transfer_continues <= transfer_continues;
-            end
+            transaction_progress <= 4'd1;
+            latched_mode <= mode;
+            // if (!mode) // Mode doesn't matter, save some logic cells
+            latched_data <= data_tx;
+            latched_transfer_continues <= transfer_continues;
         end
         // STOP condition
         else if (transaction_progress == 4'd11 && !transfer_start)
