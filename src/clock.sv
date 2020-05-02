@@ -1,13 +1,13 @@
 module clock #(
-    parameter COUNTER_WIDTH,
-    parameter COUNTER_END,
-    parameter COUNTER_HIGH,
-    parameter COUNTER_RISE,
-    parameter MULTI_MASTER,
-    parameter CLOCK_STRETCHING,
-    parameter WAIT_WIDTH,
-    parameter WAIT_END,
-    parameter PUSH_PULL = 0
+    parameter int COUNTER_WIDTH,
+    parameter bit [COUNTER_WIDTH-1:0] COUNTER_END,
+    parameter bit [COUNTER_WIDTH-1:0] COUNTER_HIGH,
+    parameter bit [COUNTER_WIDTH-1:0] COUNTER_RISE,
+    parameter bit MULTI_MASTER,
+    parameter bit CLOCK_STRETCHING,
+    parameter int WAIT_WIDTH,
+    parameter bit [WAIT_WIDTH-1:0] WAIT_END,
+    parameter bit PUSH_PULL = 0
 )(
     inout wire scl,
     input logic clk_in,
